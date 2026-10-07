@@ -118,6 +118,14 @@ approvers, link expiry, who decided, and the lead or deal it became. **Resend
 link** mails fresh links to the current approvers, or to the people you name.
 `POST /v1/internal/intake/sweep` (Admin or a service principal) runs the chase
 on demand; `INTAKE_PUBLIC_BASE_URL` must be set so the mails carry working links.
+An **Admin** can delete an enquiry from the screen (`DELETE /v1/enquiries/{id}`,
+audited): its links stop working; a lead or interaction it already created
+stays.
+
+The e-mail, the Approve page and the result page all carry the **whole**
+enquiry — company, CIN, address, contact, every capital / asset / business
+field the website sent, and the message — so the RM can decide from the mail
+alone and never has to open PRISM for it.
 
 ## What the register does with an approved enquiry
 

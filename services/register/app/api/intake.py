@@ -59,7 +59,7 @@ from evam_backend_core.company_identity import canonical_name
 from fastapi import Depends, Header, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import or_, select
+from sqlalchemy import delete, or_, select
 
 from app.core.clock import tenant_today
 from app.core.config import get_settings
@@ -556,21 +556,59 @@ async def _default_approvers(ctx: RequestContext) -> list[str]:
     return [r for r in rows if r]
 
 
-def _mail_html(row: LeadEnquiry, e: EnquiryIn | None, approve_url: str, reject_url: str,
-               expires: datetime, banner: str | None = None) -> str:
-    """The approval e-mail as Gmail renders it: a summary table and two buttons.
-    Table layout and inline styles only — mail clients honour nothing else."""
+def _label(key: str) -> str:
+    return str(key).replace("_", " ").strip().capitalize()
+
+
+def _val(v: Any) -> str | None:
+    if v in (None, "", [], {}):
+        return None
+    if isinstance(v, bool):
+        return "yes" if v else "no"
+    if isinstance(v, list):
+        return ", ".join(str(x) for x in v if x not in (None, ""))
+    if isinstance(v, dict):
+        return "; ".join(f"{_label(k)}: {_val(x)}" for k, x in v.items() if _val(x))
+    return str(v)
+
+
+def _detail_rows(row: LeadEnquiry, e: EnquiryIn | None) -> list[tuple[str, str | None]]:
+    """Everything the enquiry carries, as label/value rows — the same list in the
+    RM's e-mail, on the Approve page and on the result page, so the RM can
+    decide without opening PRISM. Unknown keys the website adds later show up
+    too, under their own names."""
     c = e.contact if e else None
     when = row.submitted_at or row.received_at
-    rows = [("Enquiry", f"{row.enquiry_no} · {row.channel}"), ("Company", row.company_name),
-            ("Contact", ", ".join(x for x in ((c.name if c else row.contact_name),
-                                               _mobile(c.mobile) if c else None,
-                                               (c.email if c else None)) if x) or None),
-            ("Ask", (("Capital" if e.intent == "capital" else "Asset monetisation" if e.intent == "assets" else "Enquiry")
-                     + " — " + _need(e)) if e else row.intent),
-            ("Submitted", when.strftime("%d %b %Y, %H:%M") if when else None)]
-    if e and e.company and e.company.address:
-        rows.insert(2, ("Address", e.company.address))
+    intent = {"capital": "Capital", "assets": "Asset monetisation"}.get(str(row.intent or ""), "Enquiry")
+    rows: list[tuple[str, str | None]] = [
+        ("Enquiry", f"{row.enquiry_no} · {row.channel}"),
+        ("Submitted", when.strftime("%d %b %Y, %H:%M") if when else None),
+        ("Company", row.company_name),
+    ]
+    if e and e.company:
+        rows += [("CIN", e.company.cin), ("Address", e.company.address),
+                 ("City / State", ", ".join(x for x in (e.company.city, e.company.state) if x) or None)]
+    rows.append(("Contact", ", ".join(x for x in ((c.name if c else row.contact_name),
+                                                  _mobile(c.mobile) if c else None,
+                                                  (c.email if c else None)) if x) or None))
+    rows.append(("Looking for", intent + (f" — {_need(e)}" if e else "")))
+    if e:
+        for title, block in (("Capital ask", e.capital), ("Asset monetisation", e.assets), ("Business", e.business)):
+            for k, v in (block or {}).items():
+                val = _val(v)
+                if val:
+                    rows.append((f"{title} · {_label(k)}", val))
+        if e.message:
+            rows.append(("Message", e.message))
+    return [(k, v) for k, v in rows if v]
+
+
+def _mail_html(row: LeadEnquiry, e: EnquiryIn | None, approve_url: str, reject_url: str,
+               expires: datetime, banner: str | None = None) -> str:
+    """The approval e-mail as Gmail renders it: the whole enquiry and two
+    buttons. Table layout and inline styles only — mail clients honour nothing
+    else."""
+    rows = _detail_rows(row, e)
     trs = "".join(
         f"<tr><td style='padding:6px 10px 6px 0;color:#5b6b7a;vertical-align:top;white-space:nowrap'>{_h(k)}</td>"
         f"<td style='padding:6px 0;color:#1d2733'>{_h(v)}</td></tr>" for k, v in rows)
@@ -811,6 +849,31 @@ async def resend_enquiry(enquiry_id: uuid.UUID, payload: ResendIn | None = None,
     return {"enquiry_no": row.enquiry_no, "links": links}
 
 
+@router.delete("/v1/enquiries/{enquiry_id}", tags=["Intake"],
+               summary="Admin: delete an enquiry (its links die with it; a lead it created stays)")
+async def delete_enquiry(enquiry_id: uuid.UUID, ctx: RequestContext = Depends(get_context)) -> dict[str, Any]:
+    _desk(ctx, write=True)
+    if "Admin" not in set(getattr(ctx.user, "roles", set()) or set()):
+        raise ForbiddenError("Only an Admin can delete an enquiry.")
+    row = (await ctx.session.execute(select(LeadEnquiry).where(
+        LeadEnquiry.tenant_id == ctx.tenant_id, LeadEnquiry.id == enquiry_id))).scalar_one_or_none()
+    if row is None:
+        from app.core.errors import NotFoundError
+        raise NotFoundError("No such enquiry.")
+    actor = (ctx.user.email if ctx.user is not None and getattr(ctx.user, "email", None) else ctx.actor)
+    ctx.session.add(AuditLog(
+        tenant_id=ctx.tenant_id, actor=actor, action="intake.delete",
+        resource_type="lead_enquiries", resource_id=str(row.id),
+        changes={"enquiry_no": row.enquiry_no, "status": row.status, "outcome": row.outcome,
+                 "company": row.company_name, "lead_id": str(row.lead_id) if row.lead_id else None,
+                 "label": row.enquiry_no}))
+    await ctx.session.execute(delete(LeadEnquiryToken).where(
+        LeadEnquiryToken.tenant_id == ctx.tenant_id, LeadEnquiryToken.enquiry_id == row.id))
+    await ctx.session.delete(row)
+    await ctx.session.flush()
+    return {"deleted": row.enquiry_no, "lead_id": str(row.lead_id) if row.lead_id else None}
+
+
 @router.post("/v1/intake/enquiries", status_code=201, tags=["Intake"],
              summary="An enquiry from the website / WhatsApp door — submitted, approved or rejected")
 async def receive_enquiry(
@@ -921,20 +984,7 @@ def _h(v: Any) -> str:
 
 
 def _summary(row: LeadEnquiry, e: EnquiryIn | None) -> str:
-    c = e.contact if e else None
-    when = row.submitted_at or row.received_at
-    rows = [
-        ("Enquiry", f"{row.enquiry_no} · {row.channel}"),
-        ("Company", row.company_name),
-        ("Contact", ", ".join(x for x in ((c.name if c else row.contact_name),
-                                           _mobile(c.mobile) if c else None,
-                                           (c.email if c else None)) if x) or None),
-        ("Ask", (("Capital" if e.intent == "capital" else "Asset monetisation" if e.intent == "assets" else "Enquiry")
-                 + " — " + _need(e)) if e else row.intent),
-        ("Submitted", when.strftime("%d %b %Y, %H:%M") if when else None),
-    ]
-    if e and e.company and e.company.address:
-        rows.insert(2, ("Address", e.company.address))
+    rows = _detail_rows(row, e)
     return "<table>" + "".join(f"<tr><td>{_h(k)}</td><td>{_h(v)}</td></tr>" for k, v in rows) + "</table>"
 
 
@@ -985,7 +1035,8 @@ def _already(row: LeadEnquiry) -> HTMLResponse:
         return _page("Already approved",
                      f"<h1>Already approved</h1><p class='sub'>Enquiry {_h(row.enquiry_no)} ({_h(row.company_name)}) "
                      f"was approved by {_h(who)}{' on ' + when if when else ''}, and {what}.</p>"
-                     f"<div class='ok'>{_h(row.note)}</div><p><a href='/ui/'>Open PRISM</a></p>")
+                     f"<div class='ok'>{_h(row.note)}</div><p class='sub'>Nothing more to do here. "
+                     f"<a href='/ui/leads'>Open Leads in PRISM</a> (sign-in needed) to work on it.</p>")
     return _page("Already rejected",
                  f"<h1>Already rejected</h1><p class='sub'>Enquiry {_h(row.enquiry_no)} ({_h(row.company_name)}) "
                  f"was rejected by {_h(who)}{' on ' + when if when else ''}.</p>"
@@ -1062,8 +1113,9 @@ async def decide(token: str, kind: str, request: Request,
                     "interaction_on_deal": "Logged on the company's live deal",
                     "interaction_on_lead": f"Logged on open lead {d.lead_no}"}.get(row.outcome, "Approved")
         inner = (f"<h1>{_h(headline)}</h1><p class='sub'>Enquiry {_h(row.enquiry_no)} · {_h(row.company_name)}</p>"
-                 f"<div class='ok'>{_h(d.body)}</div>{_summary(row, e)}"
-                 f"<p><a href='/ui/'>Open PRISM</a></p>")
+                 f"<div class='ok'>{_h(d.body)} It is in the Leads grid with a call-back for tomorrow. "
+                 f"Nothing more to do here; you can close this page.</div>{_summary(row, e)}"
+                 f"<p class='sub'>To work on it now: <a href='/ui/leads'>open Leads in PRISM</a> (sign-in needed).</p>")
         return _page("Approved", inner)
     reason = ""
     try:

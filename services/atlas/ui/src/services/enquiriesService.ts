@@ -53,4 +53,8 @@ export const enquiriesService = {
   async resend(id: string, approvers?: string[]): Promise<{ enquiry_no: string; links: { recipient: string | null }[] }> {
     return api.post(`/enquiries/${id}/resend`, approvers?.length ? { approvers } : {});
   },
+  /** Admin only: the enquiry and its links go; a lead it created stays. */
+  async remove(id: string): Promise<{ deleted: string }> {
+    return api.del(`/enquiries/${id}`);
+  },
 };

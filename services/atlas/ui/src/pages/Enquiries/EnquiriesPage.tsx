@@ -40,7 +40,9 @@ export default function EnquiriesPage() {
   const nav = useNavigate();
   const qc = useQueryClient();
   const canResend = can(user.roles, 'addLead');
+  const isAdmin = (user.roles as string[]).includes('Admin');
   const [resend, setResend] = useState<Row | null>(null);
+  const [del, setDel] = useState<Row | null>(null);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<{ sev: 'success' | 'error'; msg: string } | null>(null);
 
@@ -96,6 +98,21 @@ export default function EnquiriesPage() {
     }
   };
 
+  const doDelete = async () => {
+    if (!del) return;
+    setBusy(true);
+    try {
+      const out = await enquiriesService.remove(del.id);
+      setToast({ sev: 'success', msg: `Enquiry ${out.deleted} deleted.${del.lead_no ? ` Lead ${del.lead_no} stays.` : ''}` });
+      setDel(null);
+      void qc.invalidateQueries({ queryKey: ['enquiries'] });
+    } catch (e: any) {
+      setToast({ sev: 'error', msg: apiErr(e, 'Delete the enquiry') });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <Box>
       <PageHint>
@@ -111,7 +128,8 @@ export default function EnquiriesPage() {
         csvName="atlas_enquiries"
         initialColumnVisibility={{ channel: false, intent: false, mobile: false, decided_s: false }}
         toolbarLeft={<Button startIcon={<ArrowBackIcon />} variant="outlined" onClick={() => nav('/leads')}>Leads</Button>}
-        actionsEnabled={canResend}
+        actionsEnabled={canResend || isAdmin}
+        onDelete={isAdmin ? (r) => setDel(r) : undefined}
         extraActions={(r) => (
           ['waiting', 'reminded', 'escalated', 'expired'].includes(r.stage) && canResend ? (
             <Tooltip title="Re-send the Approve / Reject links">
@@ -127,6 +145,10 @@ export default function EnquiriesPage() {
         confirmLabel={busy ? 'Sending…' : 'Re-send'}
         message={resend ? `Fresh Approve / Reject links for ${resend.enquiry_no} (${resend.company || ''}) will be mailed to ${
           resend.approvers.length ? resend.approvers.join(', ') : 'the default approvers'}. Earlier links keep working until they expire.` : ''} />
+      <ConfirmDialog open={!!del} onCancel={() => !busy && setDel(null)} onConfirm={doDelete}
+        title="Delete this enquiry?" confirmLabel={busy ? 'Deleting…' : 'Delete'}
+        message={del ? `${del.enquiry_no} (${del.company || ''}) will be removed from this list and its links will stop working.${
+          del.lead_no ? ` Lead ${del.lead_no} is not affected.` : ''} This cannot be undone.` : ''} />
       <Snackbar open={!!toast} autoHideDuration={5000} onClose={() => setToast(null)}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
         <Alert severity={toast?.sev || 'success'} onClose={() => setToast(null)} sx={{ fontSize: 12.5 }}>{toast?.msg}</Alert>

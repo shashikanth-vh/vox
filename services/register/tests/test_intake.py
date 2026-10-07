@@ -614,3 +614,44 @@ async def test_the_desk_can_list_and_resend(client: AsyncClient, intake_on, db_s
     rows = (await client.get("/v1/enquiries", headers=ADMIN)).json()["items"]
     row = next(r for r in rows if r["enquiry_no"] == "EV483952")
     assert row["stage"] == "approved" and row["lead_no"].startswith("LD-") and row["approved_by"] == "mukesh@evamfinance.com"
+
+
+# ---- the mail and the page carry the whole enquiry; Admin can delete ----------
+async def test_the_mail_and_the_page_carry_every_detail_of_the_enquiry(client: AsyncClient, intake_on, db_session):
+    await _roster(client)
+    body = _submitted("EV483960", company={"name": "Acme Renewables Pvt Ltd", "cin": "U40106TG2019PTC123456",
+                                            "address": "Plot 14, Hitec City, Hyderabad, Telangana 500081"},
+                      message="Please call after 4 pm")
+    out = (await _post(client, body)).json()
+    html_ = (await db_session.execute(text(
+        "SELECT meta->>'html' FROM notifications WHERE meta->>'enquiry_no' = 'EV483960'"))).scalar()
+    for needle in ("U40106TG2019PTC123456", "Hyderabad, Telangana", "Sub sectors", "EV fleets, Charging",
+                   "Ticket size", "15-100", "Persona", "advisor", "Client role", "developer",
+                   "Years in operation", "3–10 years", "Annual revenue", "Debt facility for a 10 MW solar portfolio",
+                   "Please call after 4 pm", "Looking for", "Capital"):
+        assert needle in html_, needle
+    page = (await client.get(out["approve_url"])).text
+    for needle in ("U40106TG2019PTC123456", "Ticket size", "15-100", "Please call after 4 pm", "Annual revenue"):
+        assert needle in page, needle
+    done = await client.post(out["approve_url"])
+    assert "close this page" in done.text and "/ui/leads" in done.text and "Ticket size" in done.text
+
+
+async def test_an_admin_can_delete_an_enquiry_and_its_links_but_not_the_lead(client: AsyncClient, intake_on, db_session):
+    await _roster(client)
+    out = (await _post(client, _submitted("EV483961"))).json()
+    rows = (await client.get("/v1/enquiries", headers=ADMIN)).json()["items"]
+    eid = next(r for r in rows if r["enquiry_no"] == "EV483961")["id"]
+    bdrm = {"X-User-Email": "mukesh@evamfinance.com", "X-User-Roles": "BDRM"}
+    assert (await client.delete(f"/v1/enquiries/{eid}", headers=bdrm)).status_code == 403
+    # Approve first, then delete: the lead survives, the enquiry and its links go.
+    assert (await client.post(out["approve_url"])).status_code == 200
+    r = await client.delete(f"/v1/enquiries/{eid}", headers=ADMIN)
+    assert r.status_code == 200 and r.json()["deleted"] == "EV483961" and r.json()["lead_id"]
+    assert all(x["enquiry_no"] != "EV483961" for x in (await client.get("/v1/enquiries", headers=ADMIN)).json()["items"])
+    assert (await db_session.execute(text("SELECT count(*) FROM lead_enquiry_tokens"))).scalar() == 0
+    assert (await client.get(out["approve_url"])).status_code == 404
+    assert len(_items((await client.get("/v1/leads", headers=ADMIN)).json())) == 1
+    a = (await db_session.execute(text("SELECT actor FROM audit_log WHERE action = 'intake.delete'"))).scalar()
+    assert a == "admin@evamfinance.com"
+    assert (await client.delete(f"/v1/enquiries/{eid}", headers=ADMIN)).status_code == 404
