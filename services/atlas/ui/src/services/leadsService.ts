@@ -133,6 +133,10 @@ const PATCH_FIELD: Partial<Record<keyof Lead, string>> = {
   company: 'company', sector: 'sector', lens: 'lens', source: 'source',
   sourceDetail: 'source_name', rm: 'rm', status: 'status', temp: 'temperature',
   contact: 'contact', designation: 'designation', phone: 'phone',
+  // The drawer's "Company details" block. The register has taken these on PATCH
+  // since the lead gained them; this map had not, so editing a CIN in the drawer
+  // was refused on the client with "Not an editable field: cin" (release 354).
+  cin: 'cin', city: 'city', address: 'address', state: 'state', country: 'country',
   last: 'last_interaction_date', next: 'next_action', nextDate: 'next_action_date',
   conv: 'conv', notes: 'notes',
 };
