@@ -838,7 +838,17 @@ async def resend_enquiry(enquiry_id: uuid.UUID, payload: ResendIn | None = None,
         raise NotFoundError("No such enquiry.")
     if row.status != "submitted":
         raise ValidationAppError(f"Enquiry {row.enquiry_no} is already {row.status}.")
-    who = [a for a in ((payload.approvers if payload else None) or [])] or (await _token_facts(ctx, row.id))[0]
+    # Who gets the fresh links: the names given now; else the approvers the website
+    # named on this enquiry; else the register's CURRENT approvers (the Employees-master
+    # tick, the configured list, the BD Heads) — so someone ticked after the enquiry
+    # arrived is included; else whoever held the earlier links.
+    who = [a for a in ((payload.approvers if payload else None) or []) if a]
+    if not who:
+        who = [a for a in ((row.payload or {}).get("approvers") or []) if a]
+    if not who:
+        who = await _default_approvers(ctx)
+    if not who:
+        who = (await _token_facts(ctx, row.id))[0]
     links = await _mint_links(ctx, row, who, _base_url(None) or "", kind="resend")
     actor = (ctx.user.email if ctx.user is not None and getattr(ctx.user, "email", None) else ctx.actor)
     ctx.session.add(AuditLog(

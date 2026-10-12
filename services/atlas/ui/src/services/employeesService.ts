@@ -94,6 +94,29 @@ function toPersonBody(e: Partial<Employee>): Record<string, any> {
   return out;
 }
 
+/** The register roster row that is this employee, matched by e-mail first, then by either name. */
+function matchRoster(roster: any[], r: Employee): any | undefined {
+  const mail = (r.email || '').trim().toLowerCase();
+  const names = new Set([(r.full || '').trim().toLowerCase(), (r.name || '').trim().toLowerCase()].filter(Boolean));
+  return roster.find((per: any) => (mail && (per.email || '').trim().toLowerCase() === mail))
+    || roster.find((per: any) => names.has((per.full_name || '').trim().toLowerCase())
+      || names.has((per.name || '').trim().toLowerCase()));
+}
+
+/** Fold the roster row's business fields into an Access-sourced employee; Access keeps identity and roles. */
+function mergeRosterInto(r: Employee, per: any | undefined): Employee {
+  if (!per) return r;
+  r.registerId = per.id || r.registerId;
+  r.enquiryApprover = !!per.enquiry_approver;
+  if (!r.phone && per.phone) r.phone = per.phone;
+  if (!r.geography && per.geography) r.geography = per.geography;
+  if (!r.sectors && per.sectors) r.sectors = per.sectors;
+  if (!r.startedOn && per.started_on) r.startedOn = per.started_on;
+  if (!r.reportsTo && per.reports_to) r.reportsTo = per.reports_to;
+  if (!r.notes && per.notes) r.notes = per.notes;
+  return r;
+}
+
 /**
  * The ROSTER half of provisioning: the register people row, created if the register
  * does not already hold this person (matched by e-mail via /v1/people/resolve, so a
@@ -220,6 +243,12 @@ export const employeesService = {
           const byName = new Set(rows.flatMap((r) => [
             (r.full || '').trim().toLowerCase(), (r.name || '').trim().toLowerCase(),
           ]).filter(Boolean));
+          // A person on BOTH halves: Access gives identity and roles, the roster gives
+          // the business fields — geography, sectors, who they report to, and the
+          // "Enquiry approver" tick, which lives ONLY on the roster. Without this merge
+          // the grid showed every signed-in person as "not an approver" whatever was
+          // saved, so the tick looked lost on every refresh.
+          rows.forEach((r) => mergeRosterInto(r, matchRoster(roster, r)));
           roster.forEach((per: any) => {
             const mail = (per.email || '').trim().toLowerCase();
             if (mail && byMail.has(mail)) return;
@@ -270,7 +299,17 @@ export const employeesService = {
     if (!USE_REAL_API || !id) return null;
     const rows = await accessService.findUsers(id);
     const hit = rows.find((r) => (r.email || '').toLowerCase() === id.toLowerCase());
-    return hit ? fromAccessUser(hit) : null;
+    if (!hit) return null;
+    const emp = fromAccessUser(hit);
+    // The roster half, read LIVE: the register row holds the fields Access does not
+    // (geography, sectors, reports-to, notes, the enquiry-approver tick). Fail-soft:
+    // an unreachable register leaves the Access record as it is.
+    try {
+      const got = await api.get<any>('/people/resolve', { name: id });
+      const rid = got?.resolved?.id;
+      if (rid) mergeRosterInto(emp, await api.get<any>('/people/' + rid));
+    } catch { /* roster read skipped */ }
+    return emp;
   },
   /**
    * Edit BOTH halves, awaited — in production this screen is the only way people are
@@ -297,6 +336,21 @@ export const employeesService = {
       // the people PATCH succeeds and the edit looks saved — while the role, which lives
       // only in Access, quietly did not move. The roster write must not vouch for it.
       let rolesApplied = false;
+      // No roster id on the row? Resolve the person by e-mail (the row may have come
+      // from Access alone), or create the roster row — the business fields and the
+      // enquiry-approver tick live there and have nowhere else to go.
+      if (!p.registerId) {
+        const mail = (p.email || patch.email || '').trim();
+        if (mail) {
+          try {
+            const got = await api.get<any>('/people/resolve', { name: mail });
+            p.registerId = got?.resolved?.id || undefined;
+          } catch { /* resolve unavailable */ }
+        }
+        if (!p.registerId) {
+          try { p.registerId = await ensurePersonRow({ ...p, ...patch } as Employee); } catch { /* reported below */ }
+        }
+      }
       if (p.registerId) {
         touched = true;
         await api.patch('/people/' + p.registerId, toPersonBody(patch))

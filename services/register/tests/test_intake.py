@@ -655,3 +655,25 @@ async def test_an_admin_can_delete_an_enquiry_and_its_links_but_not_the_lead(cli
     a = (await db_session.execute(text("SELECT actor FROM audit_log WHERE action = 'intake.delete'"))).scalar()
     assert a == "admin@evamfinance.com"
     assert (await client.delete(f"/v1/enquiries/{eid}", headers=ADMIN)).status_code == 404
+
+
+async def test_resend_goes_to_the_approvers_ticked_now_not_only_the_earlier_ones(client: AsyncClient, intake_on):
+    """An approver ticked in the Employees master AFTER the enquiry arrived gets the
+    fresh links on re-send; the earlier recipients are not the ceiling."""
+    await _roster(client)
+    out = (await _post(client, _submitted("EV483962", approvers=None))).json()
+    assert [l["recipient"] for l in out["links"]] == ["shubh@evamfinance.com"]        # the BD Head default
+    rows = (await client.get("/v1/enquiries", headers=ADMIN)).json()["items"]
+    eid = next(r for r in rows if r["enquiry_no"] == "EV483962")["id"]
+    for name, full, email in (("Madhu", "Madhusudan Goud", "madhu@evamfinance.com"),
+                              ("Priya", "Priya Nair", "priya@evamfinance.com")):
+        r = await client.post("/v1/people", headers=ADMIN,
+                              json={"name": name, "full_name": full, "role": "BDRM", "email": email,
+                                    "enquiry_approver": True})
+        assert r.status_code == 201
+    r = await client.post(f"/v1/enquiries/{eid}/resend", headers=ADMIN, json={})
+    assert r.status_code == 200
+    assert sorted(l["recipient"] for l in r.json()["links"]) == ["madhu@evamfinance.com", "priya@evamfinance.com"]
+    rows = (await client.get("/v1/enquiries", headers=ADMIN)).json()["items"]
+    row = next(r for r in rows if r["enquiry_no"] == "EV483962")
+    assert set(row["approvers"]) == {"shubh@evamfinance.com", "madhu@evamfinance.com", "priya@evamfinance.com"}
