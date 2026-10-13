@@ -677,3 +677,31 @@ async def test_resend_goes_to_the_approvers_ticked_now_not_only_the_earlier_ones
     rows = (await client.get("/v1/enquiries", headers=ADMIN)).json()["items"]
     row = next(r for r in rows if r["enquiry_no"] == "EV483962")
     assert set(row["approvers"]) == {"shubh@evamfinance.com", "madhu@evamfinance.com", "priya@evamfinance.com"}
+    # The screen says who the NEXT re-send goes to — the ticked people, not the earlier links.
+    assert sorted(row["resend_to"]) == ["madhu@evamfinance.com", "priya@evamfinance.com"]
+
+
+async def test_resend_prefers_the_ticked_approvers_over_the_websites_list(client: AsyncClient, intake_on):
+    """An enquiry that arrived with approvers named by the website went to them;
+    once the desk ticks approvers in Employees, a re-send goes to the ticked
+    people (the desk is the one re-sending), and the dialog's list says so.
+    With nobody ticked, the website's list still stands."""
+    await _roster(client)
+    out = (await _post(client, _submitted("EV483963", approvers=["mahipal@evamfinance.com", "mukesh@evamfinance.com"]))).json()
+    assert sorted(l["recipient"] for l in out["links"]) == ["mahipal@evamfinance.com", "mukesh@evamfinance.com"]
+    rows = (await client.get("/v1/enquiries", headers=ADMIN)).json()["items"]
+    row = next(r for r in rows if r["enquiry_no"] == "EV483963")
+    assert sorted(row["resend_to"]) == ["mahipal@evamfinance.com", "mukesh@evamfinance.com"]
+    for name, full, email in (("Chetan", "Chetan Malik", "chetan@evamfinance.com"),
+                              ("Madhu", "Madhusudan Goud", "madhu@evamfinance.com")):
+        assert (await client.post("/v1/people", headers=ADMIN, json={
+            "name": name, "full_name": full, "role": "BDRM", "email": email, "enquiry_approver": True})).status_code == 201
+    rows = (await client.get("/v1/enquiries", headers=ADMIN)).json()["items"]
+    row = next(r for r in rows if r["enquiry_no"] == "EV483963")
+    assert sorted(row["resend_to"]) == ["chetan@evamfinance.com", "madhu@evamfinance.com"]
+    r = await client.post(f"/v1/enquiries/{row['id']}/resend", headers=ADMIN, json={})
+    assert r.status_code == 200
+    assert sorted(l["recipient"] for l in r.json()["links"]) == ["chetan@evamfinance.com", "madhu@evamfinance.com"]
+    # A decided enquiry has nobody to re-send to.
+    rows = (await client.get("/v1/enquiries", headers=ADMIN)).json()["items"]
+    assert all(r["resend_to"] == [] for r in rows if r["status"] != "submitted")

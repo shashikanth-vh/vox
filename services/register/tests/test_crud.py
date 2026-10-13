@@ -362,3 +362,20 @@ async def test_every_grid_facet_param_is_register_filterable(client: AsyncClient
         "last_interaction_date__lte": "2026-09-04"})).json()
     names = [x["company"] for x in (hits if isinstance(hits, list) else hits["items"])]
     assert "InRange" in names and "OutOfRange" not in names
+
+
+async def test_person_role_holds_every_role_joined(client: AsyncClient):
+    """The Employees dialog saves ALL of a person's roles as one comma-joined
+    string. Three of them ("Deal Analyst, Management, Syn RM") is 32 characters,
+    which the old 30-character column refused with "String should have at most
+    30 characters" — the edit could not be saved at all (0029 widens it)."""
+    roles = "Deal Analyst, Management, Syn RM"
+    r = await client.post("/v1/people", json={
+        "name": "Nirmala", "full_name": f"Katta Vijaya Nirmala {uuid.uuid4().hex[:6]}",
+        "role": roles, "email": "nirmala@example.com"})
+    assert r.status_code == 201, r.text
+    assert r.json()["role"] == roles
+    longer = "BDRM, Deal Analyst, Syn RM, AM RM, Management, Admin"
+    u = await client.patch(f"/v1/people/{r.json()['id']}", json={"role": longer})
+    assert u.status_code == 200, u.text
+    assert (await client.get(f"/v1/people/{r.json()['id']}")).json()["role"] == longer

@@ -538,16 +538,26 @@ async def _mint_links(ctx: RequestContext, row: LeadEnquiry, approvers: list[str
     return out
 
 
+def _people_with_mail(ctx: RequestContext):
+    return select(Person.email).where(Person.tenant_id == ctx.tenant_id, Person.deleted_at.is_(None),
+                                      Person.inactive.is_(False), Person.email.isnot(None))
+
+
+async def _ticked_approvers(ctx: RequestContext) -> list[str]:
+    """The employees ticked "Enquiry approver" in the Employees master, today."""
+    rows = (await ctx.session.execute(
+        _people_with_mail(ctx).where(Person.enquiry_approver.is_(True)).order_by(Person.full_name))).scalars().all()
+    return [r for r in rows if r]
+
+
 async def _default_approvers(ctx: RequestContext) -> list[str]:
     """Who decides when the sender names nobody: the employees ticked "Enquiry
     approver" in the Employees master; else REGISTER_INTAKE_APPROVERS; else every
     active BD Head on the roster."""
-    base = select(Person.email).where(Person.tenant_id == ctx.tenant_id, Person.deleted_at.is_(None),
-                                      Person.inactive.is_(False), Person.email.isnot(None))
-    ticked = (await ctx.session.execute(
-        base.where(Person.enquiry_approver.is_(True)).order_by(Person.full_name))).scalars().all()
+    base = _people_with_mail(ctx)
+    ticked = await _ticked_approvers(ctx)
     if ticked:
-        return [r for r in ticked if r]
+        return ticked
     configured = [x.strip() for x in get_settings().intake_approvers.split(",") if x.strip()]
     if configured:
         return configured
@@ -800,10 +810,13 @@ async def list_enquiries(ctx: RequestContext = Depends(get_context)) -> dict[str
         lead_no = dict((await ctx.session.execute(
             select(Lead.id, Lead.lead_no).where(Lead.id.in_(lead_ids)))).all())
     items = []
+    ticked = await _ticked_approvers(ctx)
     for r in rows:
         who, latest = await _token_facts(ctx, r.id)
         e = _parse(r)
+        resend_to = await _resend_to(ctx, r, None, ticked) if r.status == "submitted" else []
         items.append({
+            "resend_to": resend_to,
             "id": str(r.id), "enquiry_no": r.enquiry_no, "channel": r.channel,
             "status": r.status, "outcome": r.outcome, "stage": _stage(r, latest, now),
             "company": r.company_name, "contact": r.contact_name,
@@ -826,6 +839,28 @@ class ResendIn(BaseModel):
     approvers: list[str] | None = None
 
 
+async def _resend_to(ctx: RequestContext, row: LeadEnquiry, given: list[str] | None = None,
+                     ticked: list[str] | None = None) -> list[str]:
+    """Who a re-send goes to. The names given now; else the employees ticked
+    "Enquiry approver" TODAY — the desk's current choice outranks the list the
+    website put on the enquiry, because the desk is the one re-sending (before
+    release 355 the website's list won, so ticking more approvers changed
+    nothing for an enquiry that arrived with names); else the website's list;
+    else the configured approvers / the BD Heads; else whoever held the earlier
+    links. The Enquiries screen shows this list on every row so the re-send
+    dialog says who will actually get the mail."""
+    who = list(given or [])
+    if not who:
+        who = await _ticked_approvers(ctx) if ticked is None else list(ticked)
+    if not who:
+        who = [a for a in ((row.payload or {}).get("approvers") or []) if a]
+    if not who:
+        who = await _default_approvers(ctx)
+    if not who:
+        who = (await _token_facts(ctx, row.id))[0]
+    return who
+
+
 @router.post("/v1/enquiries/{enquiry_id}/resend", tags=["Intake"],
              summary="Re-send the Approve / Reject links for a waiting enquiry")
 async def resend_enquiry(enquiry_id: uuid.UUID, payload: ResendIn | None = None,
@@ -838,17 +873,7 @@ async def resend_enquiry(enquiry_id: uuid.UUID, payload: ResendIn | None = None,
         raise NotFoundError("No such enquiry.")
     if row.status != "submitted":
         raise ValidationAppError(f"Enquiry {row.enquiry_no} is already {row.status}.")
-    # Who gets the fresh links: the names given now; else the approvers the website
-    # named on this enquiry; else the register's CURRENT approvers (the Employees-master
-    # tick, the configured list, the BD Heads) — so someone ticked after the enquiry
-    # arrived is included; else whoever held the earlier links.
-    who = [a for a in ((payload.approvers if payload else None) or []) if a]
-    if not who:
-        who = [a for a in ((row.payload or {}).get("approvers") or []) if a]
-    if not who:
-        who = await _default_approvers(ctx)
-    if not who:
-        who = (await _token_facts(ctx, row.id))[0]
+    who = await _resend_to(ctx, row, [a for a in ((payload.approvers if payload else None) or []) if a])
     links = await _mint_links(ctx, row, who, _base_url(None) or "", kind="resend")
     actor = (ctx.user.email if ctx.user is not None and getattr(ctx.user, "email", None) else ctx.actor)
     ctx.session.add(AuditLog(

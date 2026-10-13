@@ -24,6 +24,8 @@ export interface EnquiryRow {
   submitted_at: string | null;
   received_at: string | null;
   approvers: string[];
+  /** Who the NEXT re-send goes to (the register's current rule); empty once decided. */
+  resend_to: string[];
   approved_by: string | null;
   approved_at: string | null;
   expires_at: string | null;

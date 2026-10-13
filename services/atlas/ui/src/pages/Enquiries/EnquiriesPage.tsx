@@ -144,7 +144,7 @@ export default function EnquiriesPage() {
         title="Re-send the links?" confirmColor="primary"
         confirmLabel={busy ? 'Sending…' : 'Re-send'}
         message={resend ? `Fresh Approve / Reject links for ${resend.enquiry_no} (${resend.company || ''}) will be mailed to ${
-          resend.approvers.length ? resend.approvers.join(', ') : 'the default approvers'}. Earlier links keep working until they expire.` : ''} />
+          (resend.resend_to || []).length ? resend.resend_to.join(', ') : 'the default approvers'}. Earlier links keep working until they expire.` : ''} />
       <ConfirmDialog open={!!del} onCancel={() => !busy && setDel(null)} onConfirm={doDelete}
         title="Delete this enquiry?" confirmLabel={busy ? 'Deleting…' : 'Delete'}
         message={del ? `${del.enquiry_no} (${del.company || ''}) will be removed from this list and its links will stop working.${

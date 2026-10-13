@@ -24,7 +24,7 @@ from app.schemas.base import CreateModel, ReadModel, UpdateModel
 class PersonCreate(CreateModel):
     name: str = Field(max_length=120)
     full_name: str = Field(max_length=200)
-    role: str = Field(max_length=30)
+    role: str = Field(max_length=120)
     email: str | None = Field(default=None, max_length=200)
     phone: str | None = Field(default=None, max_length=30)
     geography: str | None = Field(default=None, max_length=120)
@@ -39,7 +39,7 @@ class PersonCreate(CreateModel):
 class PersonUpdate(UpdateModel):
     name: str | None = Field(default=None, max_length=120)
     full_name: str | None = Field(default=None, max_length=200)
-    role: str | None = Field(default=None, max_length=30)
+    role: str | None = Field(default=None, max_length=120)
     email: str | None = Field(default=None, max_length=200)
     phone: str | None = Field(default=None, max_length=30)
     geography: str | None = Field(default=None, max_length=120)

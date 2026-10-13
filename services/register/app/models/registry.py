@@ -91,7 +91,7 @@ class Person(RegisterBase):
 
     name: Mapped[str] = mapped_column(String(120), nullable=False)  # short handle, e.g. "Shubh"
     full_name: Mapped[str] = mapped_column(String(200), nullable=False)
-    role: Mapped[str] = mapped_column(String(30), nullable=False)
+    role: Mapped[str] = mapped_column(String(120), nullable=False)  # every role, comma-joined (0029)
     email: Mapped[str | None] = mapped_column(String(200))
     phone: Mapped[str | None] = mapped_column(String(30))
     geography: Mapped[str | None] = mapped_column(String(120))

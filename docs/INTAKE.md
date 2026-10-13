@@ -115,7 +115,11 @@ Release 349. The register chases a waiting enquiry on its own, hourly:
 The desk sees all of it in PRISM under Leads → **Enquiries**: every enquiry
 with its stage (Waiting, Reminded, Escalated, Expired, Approved, Rejected),
 approvers, link expiry, who decided, and the lead or deal it became. **Resend
-link** mails fresh links to the current approvers, or to the people you name.
+link** mails fresh links to the people you name; else the employees ticked
+**Enquiry approver** today (the desk's current choice outranks the list the
+website put on the enquiry); else the website's list; else the configured
+approvers / BD Heads; else whoever held the earlier links. The dialog says who
+that is before you confirm (release 355).
 `POST /v1/internal/intake/sweep` (Admin or a service principal) runs the chase
 on demand; `INTAKE_PUBLIC_BASE_URL` must be set so the mails carry working links.
 An **Admin** can delete an enquiry from the screen (`DELETE /v1/enquiries/{id}`,
