@@ -123,6 +123,20 @@ export const clientsService = {
     };
     const body: Record<string, any> = {};
     Object.entries(patch).forEach(([k, v]) => { if (wire[k]) body[wire[k]] = v; });
+    // Key people go as a cleaned list: a row without a name is a half-typed row, and
+    // the register refuses one rather than storing it.
+    if (patch.keyPeople) {
+      body.key_people = patch.keyPeople
+        .map((p) => ({ name: (p.name || '').trim(), role: (p.role || '').trim() || null,
+                       city: (p.city || '').trim() || null }))
+        .filter((p) => p.name.length >= 2);
+    }
+    if (patch.newsAliases) {
+      body.news_aliases = patch.newsAliases.map((a) => a.trim()).filter((a) => /[A-Za-z]/.test(a) && a.length >= 3);
+    }
+    // Unticked "leave out" is sent as null (watched), never as a stored true: NULL is
+    // the register's "watched", so the column stays meaningful only where someone opted out.
+    if (patch.newsWatch !== undefined) body.news_watch = patch.newsWatch ? null : false;
     if (row.entityId && Object.keys(body).length) {
       remoteDebounced('patch', '/entities/' + row.entityId, body);
     }

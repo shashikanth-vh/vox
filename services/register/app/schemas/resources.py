@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from app.schemas.base import CreateModel, ReadModel, UpdateModel
 
@@ -69,6 +69,23 @@ class PersonRead(ReadModel):
 # --------------------------------------------------------------------------- #
 # Entities
 # --------------------------------------------------------------------------- #
+# A name the press prints for the firm: at least three characters, and not a bare
+# number or punctuation (an alias of "&" would match every headline).
+NewsAlias = Annotated[str, StringConstraints(strip_whitespace=True, min_length=3,
+                                             max_length=120, pattern=r"[A-Za-z]")]
+
+
+class KeyPerson(BaseModel):
+    """A director or promoter the desk watches in the news. ``city`` narrows a common
+    name ("Pranav Kumar") to the one who runs this company."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=2, max_length=120)
+    role: str | None = Field(default=None, max_length=60)
+    city: str | None = Field(default=None, max_length=120)
+
+
 class EntityCreate(CreateModel):
     code: str = Field(max_length=60)
     legal_name: str = Field(max_length=300)
@@ -92,6 +109,9 @@ class EntityCreate(CreateModel):
     toi: str | None = None
     notes: str | None = None
     tags: list[str] | None = None
+    key_people: list[KeyPerson] | None = Field(default=None, max_length=20)
+    news_aliases: list[NewsAlias] | None = Field(default=None, max_length=8)
+    news_watch: bool | None = None
 
 
 class EntityUpdate(UpdateModel):
@@ -117,6 +137,9 @@ class EntityUpdate(UpdateModel):
     toi: str | None = None
     notes: str | None = None
     tags: list[str] | None = None
+    key_people: list[KeyPerson] | None = Field(default=None, max_length=20)
+    news_aliases: list[NewsAlias] | None = Field(default=None, max_length=8)
+    news_watch: bool | None = None
 
 
 class EntityRead(ReadModel):
@@ -142,6 +165,9 @@ class EntityRead(ReadModel):
     toi: str | None
     notes: str | None
     tags: list[str] | None
+    key_people: list[dict[str, Any]] | None = None
+    news_aliases: list[str] | None = None
+    news_watch: bool | None = None
 
 
 # --------------------------------------------------------------------------- #

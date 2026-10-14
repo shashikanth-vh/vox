@@ -147,6 +147,8 @@ NEG = [
     "cleared of", "clears", "cleared", "absolves", "absolved", "denies", "denied", "deny",
     "refutes", "refuted", "rejects", "no default", "not defaulted", "acquitted",
     "acquittal", "exonerated", "dismisses", "dismissed", "quashes", "quashed", "clean chit",
+    # A court saying what something is NOT: "accounting disputes do not amount to fraud".
+    "do not amount to", "does not amount to", "did not amount to", "not amounting to",
 ]
 
 # keyword -> phrases anywhere in the headline that mean it is the WRONG sense
@@ -156,7 +158,15 @@ SENSE: dict[str, list[str]] = {
     "charges": ["charging station", "ev charg"],
     "default": ["by default", "default setting", "default option", "default mode"],
     "fine": ["doing fine", "works fine", "fine print"],
-    "strike": ["strike price", "strikes a deal"],
+    "strike": ["strike price", "strikes a deal", "drone strike", "air strike", "airstrike",
+               "missile strike", "military strike", "strike capabilit", "rules out iran strike",
+               "strike targets"],
+    # A product or a policy AGAINST fraud is not a fraud: "launches intent intelligence
+    # to catch fraud by AI agents", "fraud prevention for banks".
+    "fraud": ["fraud prevention", "fraud detection", "anti-fraud", "catch fraud",
+              "prevent fraud", "fight fraud", "fighting fraud", "combat fraud",
+              "fraud risk management", "fraud-prevention", "fraud-detection"],
+    "scam": ["scam alert", "scam awareness", "beware of scam", "'scam of the century'"],
     "recast": ["recasts its board", "recasts board", "recasts team"],
 }
 

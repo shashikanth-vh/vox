@@ -142,9 +142,34 @@ def _rows(rows: list[dict], keep: int = 25) -> str:
                        for r in rows[:keep]], ensure_ascii=False, default=str)
 
 
+def facts_text(facts: dict[str, Any] | None) -> str:
+    """PRISM's own reading of the fixed-format files (bank-statement analyses, bureau
+    reports, the CMA grid) — put before the rubric's STEP 1 so the readings use these
+    figures instead of paraphrasing 200k characters of statements."""
+    if not facts or not (facts.get("flags") or facts.get("key_figures")):
+        return ""
+    out = ["=== VERIFIED FACTS (read by PRISM from the full files; use these figures as "
+           "given, and cite them) ==="]
+    for f in facts.get("flags") or []:
+        out.append(f"- [{str(f.get('severity', '')).upper()}] {f.get('area')}: {f.get('title')}"
+                   f" — {f.get('detail')} (FILE: {f.get('source')})")
+    kf = facts.get("key_figures") or {}
+    if kf.get("rows"):
+        years = ", ".join(kf.get("years") or [])
+        out.append(f"Key figures from {kf.get('source')} ({kf.get('unit')}; years {years}):")
+        for k, row in kf["rows"].items():
+            out.append(f"  {k}: " + ", ".join(f"{y} {v:,.2f}" for y, v in row.items()))
+    if facts.get("unread_files"):
+        out.append("Files on the Data Register that were NOT read (not evidence — a trigger "
+                   "cannot be Clear because one of these exists): "
+                   + "; ".join(facts["unread_files"][:40]))
+    return "\n".join(out)
+
+
 def build_client_data(p: dict[str, Any], news: list[dict[str, Any]],
                       evidence: list[dict[str, Any]], today: date,
-                      documents: list[dict[str, Any]] | None = None) -> str:
+                      documents: list[dict[str, Any]] | None = None,
+                      facts: dict[str, Any] | None = None) -> str:
     a = p.get("anchor") or {}
     s = p.get("stats") or {}
     restricted = p.get("restricted") or []
@@ -219,6 +244,7 @@ def build_client_data(p: dict[str, Any], news: list[dict[str, Any]],
         f"9. News (PULSE radar, last 90 days — the firm, and its key people marked "
         f"[about <name>]): \n{news_text}",
         f"10. Today's date: {today.isoformat()}",
+        facts_text(facts),
         (f"NOTE: these sections are not visible to the requesting role and are absent: "
          f"{', '.join(restricted)}. Treat them as Not available.") if restricted else "",
     ])
@@ -245,6 +271,95 @@ BORDER_MARGIN = 3
 
 def band_for(score: float) -> str:
     return "GREEN" if score >= 70 else "AMBER" if score >= 45 else "RED"
+
+
+# Hard triggers that name a numeric threshold. A model will sometimes fire one
+# of these on evidence that disproves it — seen in the field: "CIBIL consumer
+# score <650 for promoters" reported as Hit with evidence quoting scores of
+# 742/752/806/861, where the real finding was a delinquency flag belonging to
+# pillar B. A trigger that forces RED on its own must agree with its evidence.
+#
+# The contract asks for each trigger "as written in STEP 1", and STEP 1's first line
+# bundles the numeric clauses with non-numeric ones ("Wilful defaulter / NPA / SMA-2 /
+# write-off / settlement, or CIBIL (commercial) rank 8–10 or consumer score < 650"). So a
+# Hit is only set aside when EVERY numeric clause the trigger names is disproved by the
+# figures it cites, at least one figure was cited, and the evidence names none of the
+# non-numeric conditions — a real SMA-2 must never be cancelled by a promoter's 780.
+# Names are matched with spacing ignored: the model writes "<650" as often as "< 650".
+#   clause:   how the trigger names it (regex on the lowercased name)
+#   figures:  pulls that clause's figures out of the evidence
+#   holds:    given those figures, is the clause met?
+def _bureau_scores(evidence: str) -> list[int]:
+    """CIBIL consumer scores cited in the evidence: 3-digit figures in 300–900 that follow
+    "CIBIL", "bureau" or "score" within the same clause. Amounts (₹/Rs/INR, lakh, crore)
+    and digits inside larger numbers are not scores. 650 itself is dropped: it is the
+    rule's threshold, quoted far more often than scored."""
+    out: set[int] = set()
+    for m in re.finditer(r"cibil|bureau|scores?", evidence, re.I):
+        clause = re.split(r"[.;\n]", evidence[m.end():m.end() + 80])[0]
+        # A comma or point joined to a digit is part of a larger number (1,234,000; 7.75).
+        for n in re.finditer(r"(₹|\brs\.?|\binr)?\s*(?<![\d.])(?<!\d,)(\d{3})"
+                             r"(?![\d.]|,\d|\s*(?:lakh|crore|cr\b))", clause, re.I):
+            if not n.group(1):
+                out.add(int(n.group(2)))
+    return sorted(n for n in out if 300 <= n <= 900 and n != 650)
+
+
+_NUMERIC_CLAUSES: list[tuple[str, re.Pattern[str], Any, Any]] = [
+    # Consumer bureau score below 650 (CIBIL consumer scores run 300–900).
+    ("consumer score < 650", re.compile(r"score\s*(?:<|below|under|less than)\s*650"),
+     _bureau_scores, lambda ns: any(n < 650 for n in ns)),
+    # Commercial rank 8–10 (CMR scale is 1–10).
+    ("commercial rank 8–10", re.compile(r"(?:rank|cmr)\s*(?:of\s*)?8\s*(?:-|–|to)\s*10"),
+     lambda ev: [int(n) for n in re.findall(r"\bCMR[-\s]?(\d{1,2})\b", ev, re.I)],
+     lambda ns: any(8 <= n <= 10 for n in ns)),
+]
+# STEP 1's non-numeric bureau conditions: any one named in the evidence keeps the Hit.
+_NON_NUMERIC = re.compile(r"wilful|\bnpa\b|sma[-\s]?2|write[-\s]?off|written[-\s]?off|"
+                          r"settle(?:d|ment)|default", re.I)
+_NEGATED = re.compile(r"\b(no|not|nil|none|without|zero|neither|nor)\b[^.;:]{0,25}$", re.I)
+
+
+def _cites_condition(evidence: str) -> bool:
+    """Whether the evidence NAMES a non-numeric STEP 1 condition as present — "No
+    NPA/SMA-2/write-off" names three and asserts none (live, 6 Oct)."""
+    return any(not _NEGATED.search(evidence[max(0, m.start() - 40):m.start()])
+               for m in _NON_NUMERIC.finditer(evidence))
+
+
+def check_numeric_triggers(triggers: list[dict[str, Any]]) -> list[str]:
+    """Downgrade a Hit to Unknown where the evidence disproves every numeric clause.
+
+    Returns the notes to add to ``adjustments``; mutates ``triggers`` in place.
+    Evidence that cites no usable figure is left alone — absent numbers mean
+    "cannot verify here", not "disproved", and the aggregate's consensus rule
+    is the other guard.
+    """
+    notes: list[str] = []
+    for t in triggers:
+        if t.get("status") != "Hit":
+            continue
+        name = str(t.get("trigger") or "").lower()
+        evidence = str(t.get("evidence") or "")
+        named = [c for c in _NUMERIC_CLAUSES if c[1].search(name)]
+        if not named or _cites_condition(evidence):
+            continue
+        cited: list[int] = []
+        supported = False
+        for _label, _name, figures, holds in named:
+            ns = figures(evidence)
+            cited += ns
+            supported = supported or (bool(ns) and holds(ns))
+        if not cited or supported:
+            continue
+        shown = ", ".join(str(n) for n in cited[:6])
+        t["status"] = "Unknown"
+        t["evidence"] = (f"{evidence} [NOT HONOURED: the figures cited ({shown}) do not meet "
+                         f"this threshold; treated as Unknown, not a RED override]")[:400]
+        notes.append(f'Hard trigger "{str(t.get("trigger"))[:60]}" was reported as Hit but its '
+                     f"own evidence cites {shown}, which does not meet the threshold — not "
+                     "honoured as a RED override.")
+    return notes
 
 
 def enforce(raw: dict[str, Any]) -> dict[str, Any]:
@@ -295,6 +410,7 @@ def enforce(raw: dict[str, Any]) -> dict[str, Any]:
                  if str(t.get("status") or "").title() in ("Hit", "Clear", "Unknown") else "Unknown",
                  "evidence": str(t.get("evidence") or "")[:400]}
                 for t in raw.get("hard_triggers") or [] if isinstance(t, dict)]
+    adjustments.extend(check_numeric_triggers(triggers))
     hits = [t for t in triggers if t["status"] == "Hit"]
 
     rating = band_for(score)
@@ -303,6 +419,10 @@ def enforce(raw: dict[str, Any]) -> dict[str, Any]:
     bank_missing = not pillars[1]["available"]
     if hits:
         rating = "RED"
+        # A RED from a trigger is still provisional when the score behind it
+        # rests on a partial file: the colour is firm, the reasoning is not.
+        if fin_missing or bank_missing:
+            provisional = True
     elif fin_missing or bank_missing:
         # The data-gap rule is a CAP (never GREEN without A and B), not a lift: a
         # score under 45 stays RED, and is provisional for the same missing data.
@@ -354,7 +474,8 @@ _EVIDENCE = {
                          "itr", "profit", "p&l", "annual report")),
     "B": ("Banking", ("bank statement", "current account", "cibil", "bureau", "crif",
                       "equifax", "experian", "scoreme", "score me", "repayment",
-                      "overdraft", "cash credit")),
+                      "overdraft", "cash credit", "bsa", "statement analysis",
+                      "account statement")),
 }
 _NOT_EVIDENCE = ("cma", "projection", "sanction")
 
@@ -369,8 +490,110 @@ def evidence_file(key: str, documents: list[dict[str, Any]]) -> str | None:
     return None
 
 
+def structural_gaps(p: dict[str, Any]) -> dict[str, str]:
+    """Pillars the panorama holds NOTHING for, so they cannot have data whatever a
+    reading says. C is the rubric's lender outcomes and Asset Monetisation; a reading
+    that scores it from purchase orders is scoring D's evidence twice. F is the
+    engagement record. Only ever removes data — the readings decide the rest."""
+    gaps: dict[str, str] = {}
+    if not (p.get("syndication") or p.get("asset_monetisation")):
+        gaps["C"] = "no Platform Deals lender outcomes or Asset Monetisation in ATLAS"
+    if not ((p.get("stats") or {}).get("last_touch") or p.get("interactions")
+            or p.get("contacts")):
+        gaps["F"] = "no engagement record (last touch, contacts, interactions) in ATLAS"
+    return gaps
+
+
+# A hard trigger PRISM verified in a document, by the STEP 1 line it belongs to.
+_TRIGGER_LINE = {"consumer score < 650": "wilful", "commercial rank 8–10": "wilful",
+                 "sub-standard or loss account": "wilful",
+                 "negative net worth": "negative net worth"}
+
+
+def apply_verified(grade: dict[str, Any], facts: dict[str, Any] | None) -> dict[str, Any]:
+    """Code over model, both ways a document can settle a trigger:
+
+    * a trigger PRISM verified in a file (a CMR-9, a CIBIL 590, negative net worth) is
+      a Hit whatever the readings said — the rubric says any hard trigger is RED;
+    * a trigger the readings marked Clear on a file that was NOT read (only its name
+      was listed) is Unknown: a file name is not evidence."""
+    facts = facts or {}
+    triggers = grade.get("hard_triggers") or []
+    notes: list[str] = []
+    for v in facts.get("triggers") or []:
+        word = _TRIGGER_LINE.get(str(v.get("clause")), "")
+        t = next((t for t in triggers if word and word in str(t.get("trigger", "")).lower()), None)
+        if t is None:
+            t = {"trigger": str(v.get("clause")), "status": "Unknown", "evidence": ""}
+            triggers.append(t)
+        if t["status"] != "Hit":
+            t["status"] = "Hit"
+            t["evidence"] = f"Verified by PRISM in the file: {v.get('evidence')}"[:400]
+            notes.append(f"Hard trigger \"{v.get('clause')}\" verified by PRISM in a document "
+                         f"— {v.get('evidence')}"[:300])
+    # The rubric's "consumer score < 650" is the CIBIL score (CreditVision). When PRISM
+    # read every promoter's, and none is below 650, a Hit resting on another score
+    # (Grameen, seen live on 6 Oct) or on nothing at all is not the rubric's trigger.
+    cibil = [s for s in facts.get("bureau_scores") or [] if isinstance(s.get("score"), int)]
+    if cibil and all(s["score"] >= 650 for s in cibil):
+        shown = ", ".join(f"{s.get('person')} {s['score']}" for s in cibil[:6])
+        for t in triggers:
+            name = str(t.get("trigger") or "").lower()
+            if (t.get("status") == "Hit"
+                    and _NUMERIC_CLAUSES[0][1].search(name)
+                    and not _cites_condition(str(t.get("evidence") or ""))
+                    and not any(str(v.get("clause")) == "consumer score < 650"
+                                for v in facts.get("triggers") or [])):
+                t["status"] = "Clear"
+                t["evidence"] = (f"Verified by PRISM: promoters' CIBIL scores {shown} — none "
+                                 "below 650. Other bureau scores below 650 are flagged for a "
+                                 "desk ruling, not this trigger.")[:400]
+                notes.append(f"\"{name[:60]}\" was marked Hit, but every promoter's CIBIL score "
+                             f"is 650 or above ({shown}) — not the rubric's trigger.")
+    unread = [u for u in facts.get("unread_files") or [] if len(u) > 4]
+    stems = {u: u.rsplit(".", 1)[0].lower() for u in unread}
+    for t in triggers:
+        if t.get("status") != "Clear":
+            continue
+        ev = str(t.get("evidence") or "").lower()
+        cited = [u for u, stem in stems.items() if stem and stem in ev]
+        backed = [r for r in facts.get("read_files") or []
+                  if (st := r.rsplit(" / ", 1)[-1].rsplit(".", 1)[0].lower()) and st in ev]
+        if cited and not backed:
+            t["status"] = "Unknown"
+            t["evidence"] = (f"{t.get('evidence')} [UNVERIFIED: rests on "
+                             f"{', '.join(cited[:3])}, which was not read]")[:400]
+            notes.append(f"\"{str(t.get('trigger'))[:60]}\" was marked Clear on "
+                         f"{', '.join(cited[:3])}, a file that was not read — shown as Unknown.")
+    if not notes:
+        return grade
+    grade["hard_triggers"] = triggers
+    grade["adjustments"] = [*grade.get("adjustments", []), *notes]
+    # Re-band from the score and the triggers as they now stand (the rubric's rules,
+    # as enforce applies them): any Hit → RED; else the score's band, capped at AMBER
+    # and provisional without Financials or Banking.
+    pillars = grade.get("pillars") or []
+    gap = any(p.get("key") in ("A", "B") and not p.get("available") for p in pillars)
+    before = grade.get("rating")
+    if any(t["status"] == "Hit" for t in triggers):
+        rating = "RED"
+    else:
+        rating = band_for(float(grade.get("score") or 0))
+        if gap and rating == "GREEN":
+            rating = "AMBER"
+    grade["rating"], grade["provisional"] = rating, gap
+    grade["borderline"] = (rating != "RED" or not any(t["status"] == "Hit" for t in triggers)) \
+        and any(abs(float(grade.get("score") or 0) - line) <= BORDER_MARGIN for line in (45, 70))
+    if rating != before:
+        grade["adjustments"].append(f"Band set to {rating} by the verified triggers "
+                                    f"(the score is {grade.get('score')}; it was {before}).")
+    grade["label"] = f"{rating} – PROVISIONAL" if gap else rating
+    return grade
+
+
 def aggregate(raws: list[dict[str, Any]],
-              documents: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+              documents: list[dict[str, Any]] | None = None,
+              gaps: dict[str, str] | None = None) -> dict[str, Any]:
     """Several independent readings → one grade, pillar by pillar.
 
     Each pillar takes the MEDIAN of the scores from the readings that found data for
@@ -380,12 +603,22 @@ def aggregate(raws: list[dict[str, Any]],
     data follows the KIND of file read — the same files always give the same
     PROVISIONAL answer, and the reason is named. A hard trigger is Hit when most
     readings mark it Hit. The rubric is then applied once to that consensus. The
-    words (verdict, risks, gaps) come from the reading whose own total is the median."""
+    words (verdict, risks, gaps) come from the reading whose own total is the median.
+    A pillar named in ``gaps`` (see structural_gaps) has no data in every reading, so the
+    per-run scores and their spread describe the same grade as the consensus."""
+    decided: list[str] = []
+    for key, reason in (gaps or {}).items():
+        if any(isinstance(x, dict) and str(x.get("key", "")).upper()[:1] == key
+               and x.get("available", True) for r in raws for x in r.get("pillars") or []):
+            decided.append(f"Pillar {key} ({_NAME[key]}) counted as without data: {reason}.")
+        raws = [{**r, "pillars": [{**x, "available": False}
+                                  if isinstance(x, dict)
+                                  and str(x.get("key", "")).upper()[:1] == key else x
+                                  for x in r.get("pillars") or []]} for r in raws]
     graded = [enforce(r) for r in raws]
     base_i = sorted(range(len(raws)), key=lambda i: graded[i]["score"])[(len(raws) - 1) // 2]
     consensus = dict(raws[base_i])
     pillars = []
-    decided: list[str] = []
     for key, name, _w in PILLARS:
         rows: list[dict[str, Any]] = []
         for r in raws:
@@ -495,6 +728,9 @@ class RiskGradeIn(BaseModel):
     news: list[NewsIn] = Field(default_factory=list, max_length=60)
     # The company's Data Register files, read by the caller's DocRAG (CAM's path).
     documents: list[DocumentIn] = Field(default_factory=list, max_length=40)
+    # What PRISM read itself from those files: flags, key figures, verified triggers,
+    # and the listed files that were not read (see apply_verified).
+    facts: dict[str, Any] = Field(default_factory=dict)
 
 
 class GradeFailedError(AppError):
@@ -594,7 +830,7 @@ def build_risk_router(settings: Settings) -> APIRouter:
         news = [n.model_dump() for n in payload.news]
         messages = [{"role": "system", "content": system},
                     {"role": "user", "content": build_client_data(
-                        p, news, ev, datetime.now(UTC).date(), documents)}]
+                        p, news, ev, datetime.now(UTC).date(), documents, payload.facts)}]
         usage = {"calls": 0, "input_tokens": 0, "output_tokens": 0}
 
         async def one_run() -> dict[str, Any]:
@@ -624,7 +860,9 @@ def build_risk_router(settings: Settings) -> APIRouter:
             if isinstance(first, AppError):
                 raise first
             raise GradeFailedError(f"grading failed ({first.__class__.__name__})") from first
-        grade = aggregate(raws, documents if documents else None)
+        grade = apply_verified(
+            aggregate(raws, documents if documents else None, structural_gaps(p)),
+            payload.facts)
         seconds = round(time.monotonic() - started, 1)
         log.info("risk_grade", extra={"company": company, "rating": grade["label"],
                                       "score": grade["score"], "model": model,

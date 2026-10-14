@@ -74,6 +74,16 @@ class Entity(RegisterBase):
     # server-authoritative list of tags so those groupings are consistent for every user,
     # not a hard-coded UI array. GIN-indexed for `?tags=` membership filters.
     tags: Mapped[list | None] = mapped_column(JSONB)
+    # The directors and promoters the desk watches: [{name, role, city}]. The News
+    # Radar searches for them with the firm, because a promoter's fraud case is news
+    # about the company even when the company is never named.
+    key_people: Mapped[list | None] = mapped_column(JSONB)
+    # The names the press prints for the firm ("Enerparc" for "Enerparc Energy"). When
+    # set, the WHOLE list the News Radar searches it by.
+    news_aliases: Mapped[list | None] = mapped_column(JSONB)
+    # False takes the record out of the news digest (a placeholder, a place, a person
+    # entered as a company). NULL = watched.
+    news_watch: Mapped[bool | None] = mapped_column(Boolean)
 
 
 class Person(RegisterBase):

@@ -339,6 +339,44 @@ def test_a_digest_of_nothing_says_so_rather_than_rendering_an_empty_table():
     assert "No articles in this window." in digest_html("Acme", [])
 
 
+def test_the_digest_names_the_brand_once_and_leads_each_card_with_the_firm():
+    """"company name should be bigger than EVAM or PRISM": the masthead appears ONCE
+    per email (it used to repeat above every firm), and each firm's name is the
+    largest text on its card."""
+    from app.news.mailer import digest_page
+    page = digest_page([
+        ("Beta Wind", [{"title": "Beta Wind fined", "url": "https://x/2", "source": "ET",
+                        "via": "Google News", "when": "20261009", "severity": "BAD"}]),
+        ("Acme Solar", [{"title": "Acme probe", "url": "https://x/1", "source": "Mint",
+                         "via": "Bing News", "when": "20261008", "severity": "UGLY"}]),
+    ], "2026-10-06", "2026-10-13", adverse_only=True)
+    assert page.count("NEWS RADAR") == 1 and "News digest &middot;" not in page
+    assert page.index(">Acme Solar</div>") < page.index(">Beta Wind</div>"), \
+        "the firm with UGLY news comes first"
+    import re as _re
+    assert _re.search(r'font-size:20px;font-weight:700;line-height:1\.25">(<a [^>]*>[^<]*</a>)?'
+                      r'Acme Solar</div>', page), "the firm name is the card's headline"
+    assert "6 Oct 2026 to 13 Oct 2026" in page and "8 Oct 2026" in page
+    assert "Adverse news digest" in page and "2 firms" in page
+
+
+def test_an_old_story_the_search_resurfaced_is_marked_older_not_passed_off_as_new():
+    from app.news.mailer import digest_page
+    page = digest_page([("Tarak Trivedi", [
+        {"title": "Unadkat seeks Trivedi's help", "url": "https://x/3", "source": "bing.com",
+         "via": "Bing News", "when": "20150617", "severity": "BAD"}])],
+        "2026-10-06", "2026-10-13")
+    assert "17 Jun 2015" in page and "older story" in page
+    tagged = digest_page([("Acme", [{"title": "t", "url": "u", "when": "20261012",
+                                     "severity": "UGLY", "about": "Director · Asha Rao"}])],
+                         "2026-10-06", "2026-10-13")
+    assert "Director · Asha Rao" in tagged and "1 about its directors / promoters" in tagged
+    for when in ("20261012", "20260930"):    # in the window, or the usual search lag
+        fresh = digest_page([("Acme", [{"title": "t", "url": "u", "when": when,
+                                        "severity": "BAD"}])], "2026-10-06", "2026-10-13")
+        assert "older story" not in fresh, when
+
+
 # --------------------------------------------------------------------------- #
 # Schedules
 # --------------------------------------------------------------------------- #
@@ -490,16 +528,17 @@ def _digest_runner_parts():
     """A run_schedule harness: fake search/send/digest that record what was covered."""
     searched, sent = [], {}
 
-    async def search(term, dfrom, dto):
+    async def search(term, dfrom, dto, **kw):
         searched.append(term)
-        return [{"title": f"{term} wins order", "url": "https://x/1", "severity": "GOOD"}]
+        return [{"title": f"{term} wins order", "url": f"https://x/{term}",
+                 "severity": "GOOD"}]
 
     def send(recipients, subject, body):
         sent.update({"recipients": recipients, "subject": subject, "body": body})
         return True, "Sent to 1 recipient(s)"
 
-    def digest(term, arts, dfrom, dto):
-        return f"<b>{term}</b>"
+    def digest(groups, dfrom, dto, *, adverse_only=False, coverage=None):
+        return "".join(f"<b>{term}</b>" for term, _ in groups)
 
     return searched, sent, search, send, digest
 
@@ -520,7 +559,7 @@ async def test_an_all_firms_digest_covers_the_register_as_of_send_time():
          "recipients": ["a@b.com"], "window_days": 7},
         search=search, send=send, digest=digest, firm_terms=firm_terms)
     assert ok is True
-    assert searched == ["acme solar india", "OldCo watch term",
+    assert searched == ["Acme Solar India", "OldCo watch term",
                         "Beta Wind", "Newly Added Energy"], \
         "snapshot kept (watch term included), fresh firms appended, dupes and corporate " \
         "suffixes folded"
@@ -556,6 +595,322 @@ async def test_a_plain_term_schedule_never_touches_the_register():
          "recipients": ["a@b.com"], "window_days": 7},
         search=search, send=send, digest=digest, firm_terms=firm_terms)
     assert not called and searched == ["Acme Solar"]
+
+
+@pytest.mark.asyncio
+async def test_a_firms_key_people_are_searched_with_it_and_named_on_its_card():
+    """"check the directors of the companies and add it": each listed person is searched
+    as a NAME (strict, with their city), and what they turn up lands on the firm's card
+    tagged with who it is about — an article naming both appears once."""
+    calls, sent = [], {}
+
+    async def search(term, dfrom, dto, **kw):
+        calls.append((term, kw))
+        if term == "Asha Rao":
+            return [{"title": "Asha Rao named in GST fraud probe", "url": "https://x/p",
+                     "severity": "UGLY"},
+                    {"title": "Keypeople Batteries wins order", "url": "https://x/f",
+                     "severity": "GOOD"}]
+        return [{"title": f"{term} wins order", "url": "https://x/f", "severity": "GOOD"}]
+
+    def send(recipients, subject, body):
+        sent.update(subject=subject, body=body)
+        return True, "sent"
+
+    async def firm_terms():
+        return [{"name": "Keypeople Batteries Pvt Ltd",
+                 "people": [{"name": "Asha Rao", "role": "Director", "city": "Coimbatore"},
+                            {"role": "nameless rows are skipped"}]}]
+
+    seen_groups = {}
+
+    def digest(groups, dfrom, dto, *, adverse_only=False, coverage=None):
+        seen_groups.update(dict(groups))
+        return "<p>digest</p>"
+
+    ok, _, firms, items = await sched.run_schedule(
+        {"id": "S1", "scope": "all-firms", "q": "", "recipients": ["a@b.com"]},
+        search=search, send=send, digest=digest, firm_terms=firm_terms)
+    assert ok and firms == 1 and items == 2
+    assert ("Keypeople Batteries", {"strict": True, "context": "",
+                                    "names": ["Keypeople Batteries", "Keypeople"]}) in calls, \
+        "searched under its full name and the short name the press would print"
+    assert ("Asha Rao", {"strict": True, "context": "Coimbatore",
+                         "names": ["Asha Rao"]}) in calls
+    card = seen_groups["Keypeople Batteries"]
+    assert [a.get("about") for a in card] == [None, "Director · Asha Rao"], \
+        "the firm's own article once, the director's tagged"
+
+
+@pytest.mark.asyncio
+async def test_the_scheduled_digest_searches_firms_in_parallel_not_one_by_one():
+    """"can we speed it up": the run used to await each firm in turn. Now several are in
+    flight at once (bounded), so a 400-firm digest is not 400 serial waits."""
+    inflight = peak = 0
+
+    async def search(term, dfrom, dto, **kw):
+        nonlocal inflight, peak
+        inflight += 1
+        peak = max(peak, inflight)
+        await asyncio.sleep(0.05)
+        inflight -= 1
+        return []
+
+    t0 = time_mod.time()
+    await sched.run_schedule(
+        {"id": "S1", "scope": "terms", "q": ",".join(f"Firm {i}" for i in range(24)),
+         "recipients": ["a@b.com"]},
+        search=search, send=lambda *a: (True, "sent"), digest=lambda *a, **k: "")
+    assert 1 < peak <= sched.DIGEST_CONCURRENCY
+    assert time_mod.time() - t0 < 24 * 0.05 / 2, "well under the serial time"
+
+
+def test_a_name_search_keeps_only_articles_that_print_the_name_inside_the_window():
+    from app.news.search import in_window, mentions
+    assert mentions({"title": "Atlanta System wins grid order"}, "Atlanta System")
+    assert not mentions({"title": "Man shoots passenger on Atlanta bus"}, "Atlanta System")
+    assert mentions({"title": "Probe widens", "snippet": "Pranav S. Kumar, a partner,"},
+                    "Pranav S Kumar"), "punctuation in the article does not hide the name"
+    assert not mentions({"title": "Landmark ruling"}, "Land"), "whole words only"
+    assert in_window({"when": "20261012"}, "2026-10-06", "2026-10-13")
+    assert in_window({"when": "20260930"}, "2026-10-06", "2026-10-13"), "a week's grace"
+    assert not in_window({"when": "20150617"}, "2026-10-06", "2026-10-13")
+    assert in_window({"when": ""}, "2026-10-06", "2026-10-13"), "undated is kept"
+
+
+@pytest.mark.asyncio
+async def test_strict_search_quotes_the_name_and_drops_what_does_not_name_it(monkeypatch):
+    engine = NewsSearch(disable_gdelt=True)
+    asked = []
+
+    async def fake_rss(client, q, dfrom, dto):
+        asked.append(q)
+        return ([{"title": "Atlanta System wins grid order", "url": "https://a/1",
+                  "source": "ET", "when": "20261010", "via": "Google News"},
+                 {"title": "Bus shooting in Atlanta", "url": "https://a/2",
+                  "source": "CBS", "when": "20261010", "via": "Google News"},
+                 {"title": "Atlanta System profile", "url": "https://a/3",
+                  "source": "bing.com", "when": "20160318", "via": "Bing News"}],
+                {"name": "x", "ok": True, "count": 3})
+
+    monkeypatch.setattr(engine, "_google", fake_rss)
+    monkeypatch.setattr(engine, "_bing", fake_rss)
+    loose = await engine.search("Atlanta System", "2026-10-06", "2026-10-13")
+    strict = await engine.search("Atlanta System", "2026-10-06", "2026-10-13",
+                                 strict=True, context="Pune")
+    assert len(loose) == 3, "a topic search is left alone"
+    assert [a["url"] for a in strict] == ["https://a/1"]
+    assert '"Atlanta System" Pune' in asked
+
+
+def test_a_firm_is_watched_under_the_short_name_the_press_prints_only_when_it_is_safe():
+    """"Enerparc insolvency" never says "Enerparc Energy": the digest lost the biggest
+    story in the 13 Oct email to a full-name match. A short name is taken only when
+    what is left is distinctive; "Future Solar" must never become "Future"."""
+    from app.news.names import short_name, watch_names
+    assert short_name("Enerparc Energy") == "Enerparc"
+    assert short_name("Saera Electric Auto") == "Saera"
+    assert short_name("Pashupati Group") == "Pashupati"
+    assert short_name("Euroteck Environmental") == "Euroteck"
+    for generic in ("Future Solar", "Capital Energy", "Atlanta System", "Rajasthan Solar",
+                    "Surya Synergy", "Clear Water", "Green Next Energy", "Sada Energy",
+                    "Okaya", "Land",
+                    # the live run: a judge's surname, a business house, namesakes
+                    "Datta Power Infra", "Adani Solar", "Orano Energy",
+                    "Praveen Capital", "Terex India"):
+        assert short_name(generic) is None, generic
+    assert watch_names("Enerparc Energy") == ["Enerparc Energy", "Enerparc"]
+    assert watch_names("Land", ["Land Renewables", "LRPL"]) == ["Land Renewables", "LRPL"], \
+        "an analyst's names are the whole list: a firm named after a word is watchable"
+
+
+@pytest.mark.asyncio
+async def test_a_record_marked_not_watched_leaves_the_digest_even_from_the_snapshot():
+    searched, _, search, send, digest = _digest_runner_parts()
+
+    async def firm_terms():
+        return [{"name": "Consultant 1", "watch": False}, {"name": "Beta Wind"}]
+
+    await sched.run_schedule(
+        {"id": "S1", "scope": "all-firms", "q": "Consultant 1, Acme Solar",
+         "recipients": ["a@b.com"]},
+        search=search, send=send, digest=digest, firm_terms=firm_terms)
+    assert searched == ["Acme Solar", "Beta Wind"]
+
+
+@pytest.mark.asyncio
+async def test_a_story_already_sent_is_not_sent_again_and_what_went_out_is_remembered():
+    """The same Satyendar Jain arrest arrived every week: a schedule now remembers what
+    it sent and only sends what is new — and only remembers a send that succeeded."""
+    _, sent, search, send, digest = _digest_runner_parts()
+    remembered = []
+    first = {"id": "S1", "q": "Acme Solar, Beta Wind", "recipients": ["a@b.com"]}
+    ok, _, firms, _ = await sched.run_schedule(
+        first, search=search, send=send, digest=digest,
+        already_sent={sched.story_key({"title": "Acme Solar wins order"})},
+        on_sent=remembered.extend)
+    assert ok and firms == 1 and "Beta Wind" in sent["body"] and "Acme" not in sent["body"]
+    assert remembered == [sched.story_key({"title": "Beta Wind wins order"})]
+    remembered.clear()
+    await sched.run_schedule(first, search=search, send=lambda *a: (False, "smtp down"),
+                             digest=digest, on_sent=remembered.extend)
+    assert remembered == [], "a failed send is not remembered as sent"
+
+
+def test_two_records_reporting_the_same_story_become_one_card():
+    a = {"title": "Satyendar Jain arrested: 7 key details on DJB tenders, Euroteck"}
+    b = {"title": "DJB Tender Scam: Court grants bail to ex-engineer"}
+    merged = sched.merge_shared([("Euroteck", [a, b]), ("Euroteck Environmental", [a]),
+                                 ("Beta Wind", [{"title": "Beta Wind wins order"}])])
+    assert [n for n, _ in merged] == ["Euroteck · Euroteck Environmental", "Beta Wind"]
+    assert len(merged[0][1]) == 2, "the shared story appears once"
+
+
+def test_one_story_from_many_outlets_is_one_item_with_its_other_reports_beneath():
+    from app.news.mailer import digest_page, stories
+    arts = [{"title": "Enerparc insolvency: more than 100 inquiries, transaction targeted",
+             "severity": "UGLY", "when": "20261007", "url": "u1"},
+            {"title": "Enerparc insolvency administrator targets solar portfolio sale",
+             "severity": "UGLY", "when": "20261007", "url": "u2"},
+            {"title": "Enerparc attracts 100 potential investors as insolvency sale moves",
+             "severity": "UGLY", "when": "20261005", "url": "u3"},
+            {"title": "Enerparc commissions 50 MW plant in Gujarat", "severity": "GOOD",
+             "when": "20261006", "url": "u4"}]
+    assert [len(g) for g in stories(arts, "Enerparc Energy")] == [3, 1]
+    page = digest_page([("Enerparc Energy", arts), ("Beta Wind", arts[3:])],
+                       "2026-10-06", "2026-10-13")
+    assert "2 more reports of this story" in page and "2 stories from 4 reports" in page
+    assert 'href="#firm-enerparc-energy"' in page and 'id="firm-enerparc-energy"' in page, \
+        "the contents line jumps to the card"
+    assert page.count('href="#top"') == 2 and 'id="top"' in page, "and each card jumps back"
+
+
+def test_bing_names_its_publisher_and_its_links_go_straight_to_the_article():
+    from app.news.search import _rss_items
+    xml = ('<rss xmlns:News="https://www.bing.com/news/search?q=x&amp;format=rss"><channel>'
+           '<item><title>Acme Solar wins order</title>'
+           '<link>http://www.bing.com/news/apiclick.aspx?ref=FexRss&amp;url=https%3a%2f%2f'
+           'www.livemint.com%2fstory%2facme&amp;c=1</link>'
+           '<pubDate>Mon, 12 Oct 2026 20:12:44 GMT</pubDate>'
+           '<News:Source>Mint</News:Source></item></channel></rss>')
+    [item] = _rss_items(xml, "Bing News")
+    assert item["source"] == "Mint" and item["url"] == "https://www.livemint.com/story/acme"
+
+
+def test_headlines_against_fraud_or_a_military_strike_are_not_adverse_news():
+    from app.news.triage import classify
+    assert classify("Darwinium launches capabilities to catch fraud by AI agents") == "GOOD"
+    assert classify("Fraud Prevention for AI Agents, Humans and Bots") == "GOOD"
+    assert classify("Drone Strike Targets Oil Tanker off Oman") == "GOOD"
+    assert classify("Accounting disputes do not amount to fraud, tribunal holds") != "UGLY"
+    assert classify("Workers go on strike at Acme plant") == "BAD", "a labour strike still is"
+    assert classify("Promoter arrested in loan fraud case") == "UGLY"
+
+
+@pytest.mark.asyncio
+async def test_a_source_is_asked_no_faster_than_it_allows():
+    """The live run asked Google News for six feeds at once and got its automated-
+    traffic block for 365 of 489 firms. Each source now has its own spacing."""
+    from app.news.search import SourceGate
+    gate = SourceGate("Google News", 0.05)
+    t0 = time_mod.monotonic()
+    await asyncio.gather(*(gate.enter() for _ in range(4)))
+    assert time_mod.monotonic() - t0 >= 0.14, "four requests, spaced three intervals apart"
+    slow = SourceGate("GDELT", 5.0)
+    assert await slow.enter(max_wait=0) is None
+    why = await slow.enter(max_wait=0)
+    assert why and "one request every 5 s" in why, "a bulk search skips, it does not queue"
+
+
+@pytest.mark.asyncio
+async def test_a_failing_source_is_paused_and_reported_not_hammered():
+    from app.news.search import SourceGate
+    gate = SourceGate("Google News", 0.0, trip_after=3, cooldown=60)
+    for _ in range(3):
+        assert await gate.enter() is None
+        gate.done(False)
+    why = await gate.enter()
+    assert why and why.startswith("paused after 3 failures")
+
+
+@pytest.mark.asyncio
+async def test_the_digest_says_which_sources_could_not_be_searched_for_how_many_firms():
+    """The live run's email looked complete with Google blocked for most firms. Now the
+    run counts, per source, the firms it could not search, and the email says it."""
+    got = {}
+
+    async def search(term, dfrom, dto, **kw):
+        ok = term != "Beta Wind"
+        return ([{"title": f"{term} fined by regulator", "url": f"u/{term}",
+                  "severity": "BAD"}],
+                [{"name": "Google News", "ok": ok, "error": "" if ok else "HTTP 503"},
+                 {"name": "GDELT", "ok": False, "skipped": True,
+                  "error": "not asked: it allows one request every 5.5 s"},
+                 {"name": "Bing News", "ok": True}])
+
+    def digest(groups, dfrom, dto, *, adverse_only=False, coverage=None):
+        got["coverage"] = coverage
+        from app.news.mailer import digest_page
+        return digest_page(groups, dfrom, dto, adverse_only=adverse_only, coverage=coverage)
+
+    sent = {}
+    ok, msg, _, _ = await sched.run_schedule(
+        {"id": "S1", "q": "Acme Solar, Beta Wind", "recipients": ["a@b.com"]},
+        search=search, send=lambda to, subj, body: (sent.update(body=body) or True, "sent"),
+        digest=digest)
+    assert got["coverage"]["down"] == {"Google News": 1, "GDELT": 2}
+    assert "Google News for 1 of 2 firms" in msg
+    body = sent["body"]
+    assert "2 firms searched" in body
+    assert "<b>Google News</b> could not be searched for 1 of 2 firms (HTTP 503)" in body
+    assert "may be missing news" in body
+    assert "GDELT was not asked for 2 of 2 firms" in body, "pacing is said, but not alarmed"
+
+
+@pytest.mark.asyncio
+async def test_a_firm_is_never_searched_with_or_because_bing_answers_it_with_nothing(monkeypatch):
+    """Live on cipher-test: Bing returned 0 items for '"Enerparc Energy" OR "Enerparc"'
+    and 14 for '"Enerparc"', so every firm with a short name was blind on Bing. Each name
+    is its own query now, and a name containing another one is not asked separately."""
+    engine = NewsSearch(disable_gdelt=True, pace=False)
+    asked = []
+
+    async def fake(client, q, dfrom, dto):
+        asked.append(q)
+        return ([{"title": "Enerparc insolvency administrator targets sale", "url": "https://e/1",
+                  "source": "PV", "when": "20261007", "via": "Bing News"}],
+                {"name": "Bing News", "ok": True, "count": 1})
+
+    monkeypatch.setattr(engine, "_google", fake)
+    monkeypatch.setattr(engine, "_bing", fake)
+    got = await engine.search("Enerparc Energy", "2026-10-06", "2026-10-13", strict=True,
+                              names=["Enerparc Energy", "Enerparc"])
+    assert asked == ['"Enerparc"', '"Enerparc"'], "one query per source, no OR"
+    assert len(got) == 1, "the same article from both sources appears once"
+    assert got[0]["matched"] == "Enerparc"
+    from app.news.mailer import digest_page
+    page = digest_page([("Enerparc Energy", got)], "2026-10-06", "2026-10-13")
+    assert "found as &ldquo;Enerparc&rdquo;" in page, "a short-name match says so"
+    plain = digest_page([("Enerparc Energy", [{**got[0], "matched": "Enerparc Energy"}])],
+                        "2026-10-06", "2026-10-13")
+    assert "found as" not in plain, "a full-name match needs no remark"
+    asked.clear()
+    await engine.search("Land", "2026-10-06", "2026-10-13", strict=True,
+                        names=["Land Renewables", "LRPL"])
+    assert sorted(asked) == ['"LRPL"', '"LRPL"', '"Land Renewables"', '"Land Renewables"']
+
+
+def test_the_word_list_ships_inside_the_package_not_only_in_the_source_tree():
+    """Live on cipher-test, a script that imported the INSTALLED package got an empty
+    word list — so no short names, and Enerparc's insolvency went missing. The list is
+    declared package data now; this checks the declaration and the loaded list."""
+    import tomllib
+    from pathlib import Path
+
+    from app.news import names
+    conf = tomllib.loads((Path(__file__).parents[1] / "pyproject.toml").read_text())
+    assert "data/*" in conf["tool"]["setuptools"]["package-data"]["app.news"]
+    assert len(names._english()) > 50000
 
 
 def test_trading_name_sheds_the_suffixes_the_press_never_prints():

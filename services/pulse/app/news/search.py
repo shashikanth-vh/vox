@@ -28,12 +28,14 @@ import time
 import urllib.parse
 import xml.etree.ElementTree as ET  # noqa: S405 - parsing responses from named sources
 from collections import OrderedDict
+from datetime import datetime, timedelta
 from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
 from evam_backend_core.logging import get_logger
 
+from app.news.names import watch_names
 from app.news.triage import classify, triage
 
 log = get_logger("pulse.search")
@@ -72,6 +74,16 @@ def _when_of(pub_date: str | None) -> str:
         return ""
 
 
+def _unwrapped(link: str) -> str:
+    """Bing's links go through a click-tracker (``bing.com/news/apiclick.aspx?…&url=``);
+    the article's own address is in the ``url`` parameter. Unwrapped, the reader goes
+    straight to the publisher and the source column can name it."""
+    if "bing.com/news/apiclick" not in link:
+        return link
+    real = urllib.parse.parse_qs(urllib.parse.urlsplit(link).query).get("url", [""])[0]
+    return real if re.match(r"https?://", real) else link
+
+
 def _rss_items(xml_text: str, via: str, *, require_http: bool = False) -> list[dict[str, Any]]:
     """The shared shape of both RSS sources. A feed that is not XML (an error page, a
     captcha) raises here and is handled by the caller as "that source had nothing"."""
@@ -81,17 +93,60 @@ def _rss_items(xml_text: str, via: str, *, require_http: bool = False) -> list[d
         link = (item.findtext("link") or "").strip()
         if not title or not link or (require_http and not link.startswith("http")):
             continue
+        link = _unwrapped(link)
         source = ""
-        se = item.find("source")
-        if se is not None and se.text:
-            source = se.text.strip()
+        # Google names the publisher in <source>; Bing in <News:Source>, under a
+        # namespace that is the query URL itself — so match the local name, not the tag.
+        for child in item:
+            if (child.tag == "source" or child.tag.endswith("}Source")) and child.text:
+                source = child.text.strip()
+                break
         source = source or _domain(link)
         # Google appends " - Source" to every headline; the source has its own column.
         if source and title.endswith(" - " + source):
             title = title[: -(len(source) + 3)].strip()
+        # The snippet is what the relevance check reads besides the headline: Bing's
+        # is a sentence of the article, Google's repeats the headline in markup.
+        snippet = re.sub(r"<[^>]+>", " ", item.findtext("description") or "")
         out.append({"title": title, "url": link, "source": source,
-                    "when": _when_of(item.findtext("pubDate")), "via": via})
+                    "when": _when_of(item.findtext("pubDate")), "via": via,
+                    "snippet": re.sub(r"\s+", " ", snippet).strip()[:400]})
     return out
+
+
+def _words(text: str) -> str:
+    """Lower-case words separated by single spaces, padded — so a phrase test is a
+    plain substring test that cannot match inside a longer word."""
+    return " " + " ".join(re.findall(r"[a-z0-9]+", (text or "").lower())) + " "
+
+
+def mentions(article: dict[str, Any], name: str) -> bool:
+    """Does the headline or snippet actually name ``name``, as whole words?
+
+    A search engine answers an unquoted "Atlanta System" with a bus shooting in
+    Atlanta; this is the check that keeps it out of the digest."""
+    needle = _words(name)
+    return needle.strip() != "" and needle in _words(
+        f"{article.get('title', '')} {article.get('snippet', '')}")
+
+
+# A source's date is when IT first saw the piece, often a few days after publication;
+# a week's grace keeps that lag in, and keeps a resurfaced 2016 story out.
+WINDOW_GRACE_DAYS = 7
+
+
+def in_window(article: dict[str, Any], dfrom: str, dto: str) -> bool:
+    """Inside the asked window (with the grace above). Undated items are kept: no
+    date is not evidence of an old story."""
+    when = re.sub(r"\D", "", article.get("when") or "")[:8]
+    if len(when) != 8:
+        return True
+    if _valid_date(dfrom):
+        floor = (datetime.strptime(dfrom, "%Y-%m-%d")
+                 - timedelta(days=WINDOW_GRACE_DAYS)).strftime("%Y%m%d")
+        if when < floor:
+            return False
+    return not (_valid_date(dto) and when > dto.replace("-", ""))
 
 
 def _reason(exc: Any) -> str:
@@ -120,6 +175,65 @@ def _failed(name: str, exc: Any) -> dict[str, Any]:
     return {"name": name, "ok": False, "count": 0, "error": _reason(exc)}
 
 
+class SourceGate:
+    """Spacing and a breaker for ONE upstream — what the 13 Oct live run was missing.
+
+    Six firms searched at once asked Google News for six feeds at once, over and over,
+    and Google answered with its automated-traffic page (HTTP 503) for 365 of 489
+    firms; GDELT says outright "one request every 5 seconds" and answered 429 for 389.
+    Each source now gets requests no closer together than ``interval`` seconds,
+    whatever the concurrency above it. A source that fails ``trip_after`` times in a
+    row is paused for ``cooldown`` seconds instead of being hammered, and every search
+    in that time reports it as not searched — never as searched and empty.
+
+    ``enter(max_wait)``: wait for the next slot and return None, or return the reason
+    the source is skipped (paused, or the slot is further off than ``max_wait``)."""
+
+    def __init__(self, name: str, interval: float, *, trip_after: int = 4,
+                 cooldown: float = 600.0) -> None:
+        self.name, self.interval = name, interval
+        self.trip_after, self.cooldown = trip_after, cooldown
+        self._next = 0.0
+        self._fails = 0
+        self._paused_until = 0.0
+
+    async def enter(self, max_wait: float | None = None) -> str | None:
+        now = time.monotonic()
+        if now < self._paused_until:
+            return (f"paused after {self.trip_after} failures in a row; "
+                    f"tried again in {int(self._paused_until - now) // 60 + 1} min")
+        slot = max(now, self._next)
+        if max_wait is not None and slot - now > max_wait:
+            return f"not asked: it allows one request every {self.interval:g} s"
+        # Claimed before sleeping (no await in between), so concurrent callers queue.
+        self._next = slot + self.interval
+        if slot > now:
+            await asyncio.sleep(slot - now)
+        return None
+
+    def done(self, ok: bool) -> None:
+        if ok:
+            self._fails = 0
+            return
+        self._fails += 1
+        if self._fails >= self.trip_after:
+            self._paused_until = time.monotonic() + self.cooldown
+            self._fails = 0
+            log.warning("pulse_source_paused", extra={"source": self.name,
+                                                     "seconds": self.cooldown})
+
+
+# Request spacing per source, in seconds. Google News tolerates a steady trickle and
+# blocks a burst; GDELT publishes its limit (one per 5 s); Bing took the whole live run.
+GOOGLE_INTERVAL_S = 1.5
+BING_INTERVAL_S = 0.25
+GDELT_INTERVAL_S = 5.5
+
+
+def _skipped(name: str, why: str) -> dict[str, Any]:
+    return {"name": name, "ok": False, "count": 0, "error": why, "skipped": True}
+
+
 class NewsSearch:
     """One search engine per process: a bounded upstream pool, a shared TTL cache and
     request coalescing, so twenty desks asking about the same company at once cost one
@@ -127,7 +241,7 @@ class NewsSearch:
 
     def __init__(self, *, disable_gdelt: bool = False, timeout_s: float = 12.0,
                  cache_ttl_s: int = 900, cache_max: int = 500,
-                 upstream_concurrency: int = 8) -> None:
+                 upstream_concurrency: int = 8, pace: bool = True) -> None:
         self.disable_gdelt = disable_gdelt
         self.timeout_s = timeout_s
         self.cache_ttl_s = cache_ttl_s
@@ -136,6 +250,11 @@ class NewsSearch:
         self._inflight: dict[str, asyncio.Future] = {}
         self._sem = asyncio.Semaphore(upstream_concurrency)
         self._gdelt_warned = False
+        # pace=False (tests that measure overlap) keeps the breakers, drops the spacing.
+        k = 1.0 if pace else 0.0
+        self._gates = {"Google News": SourceGate("Google News", GOOGLE_INTERVAL_S * k),
+                       "Bing News": SourceGate("Bing News", BING_INTERVAL_S * k),
+                       "GDELT": SourceGate("GDELT", GDELT_INTERVAL_S * k)}
         # ONE client for the process, built on first use.
         #
         # A sweep of four hundred firms used to open four hundred clients — three fresh
@@ -175,42 +294,69 @@ class NewsSearch:
             resp.raise_for_status()
             return resp.text
 
+    async def _gated(self, name: str, gated: bool, max_wait: float | None,
+                     call: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """Run one source call through its gate (spacing + breaker). ``gated=False``
+        is for the diagnostics probe, which must report the network as it is."""
+        gate = self._gates[name]
+        if gated and (why := await gate.enter(max_wait)) is not None:
+            return [], _skipped(name, why)
+        items, status = await call()
+        if gated:
+            gate.done(bool(status.get("ok")))
+        return items, status
+
     async def _google(self, client: httpx.AsyncClient, term: str,
-                      dfrom: str, dto: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+                      dfrom: str, dto: str, *, gated: bool = True,
+                      ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         q = term
         if _valid_date(dfrom):
             q += " after:" + dfrom
         if _valid_date(dto):
             q += " before:" + dto
-        try:
-            xml = await self._get(client, GOOGLE_NEWS % urllib.parse.quote(q))
-            items = _rss_items(xml, "Google News")
-            return items, _ok("Google News", len(items))
-        except Exception as exc:  # noqa: BLE001 - a best-effort source
-            log.warning("pulse_google_news_failed", extra={"error": str(exc)})
-            return [], _failed("Google News", exc)
+
+        async def call() -> tuple[list[dict[str, Any]], dict[str, Any]]:
+            try:
+                xml = await self._get(client, GOOGLE_NEWS % urllib.parse.quote(q))
+                items = _rss_items(xml, "Google News")
+                return items, _ok("Google News", len(items))
+            except Exception as exc:  # noqa: BLE001 - a best-effort source
+                log.warning("pulse_google_news_failed", extra={"error": str(exc)})
+                return [], _failed("Google News", exc)
+        return await self._gated("Google News", gated, None, call)
 
     async def _bing(self, client: httpx.AsyncClient, term: str,
-                    dfrom: str, dto: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+                    dfrom: str, dto: str, *, gated: bool = True,
+                    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         """Ignores the date range — Bing's RSS has no reliable date filter — but stays
         up when the other two throttle, which is exactly when it earns its place."""
-        try:
-            xml = await self._get(client, BING_NEWS % urllib.parse.quote(term))
-            items = _rss_items(xml, "Bing News", require_http=True)
-            return items, _ok("Bing News", len(items))
-        except Exception as exc:  # noqa: BLE001
-            log.warning("pulse_bing_news_failed", extra={"error": str(exc)})
-            return [], _failed("Bing News", exc)
+        async def call() -> tuple[list[dict[str, Any]], dict[str, Any]]:
+            try:
+                xml = await self._get(client, BING_NEWS % urllib.parse.quote(term))
+                items = _rss_items(xml, "Bing News", require_http=True)
+                return items, _ok("Bing News", len(items))
+            except Exception as exc:  # noqa: BLE001
+                log.warning("pulse_bing_news_failed", extra={"error": str(exc)})
+                return [], _failed("Bing News", exc)
+        return await self._gated("Bing News", gated, None, call)
 
     async def _gdelt(self, client: httpx.AsyncClient, term: str,
-                     dfrom: str, dto: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+                     dfrom: str, dto: str, query: str = "", *, gated: bool = True,
+                     max_wait: float | None = None,
+                     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """``query`` is a ready-made GDELT query (a strict name search); without it the
+        term is searched as one quoted phrase. GDELT allows one request every five
+        seconds, so a bulk search asks it only when a slot is free (``max_wait=0``)
+        and the rest are reported as not asked; there is no quick retry, which is
+        exactly what earned the 429s."""
         if self.disable_gdelt:
             return [], {"name": "GDELT", "ok": True, "count": 0, "note": "off"}
-        q = urllib.parse.quote('"%s"' % term)
+        q = urllib.parse.quote(query or f'"{term}"')
         url = (GDELT_RANGE % (q, dfrom.replace("-", "") + "000000",
                               dto.replace("-", "") + "235959")
                if _valid_date(dfrom) and _valid_date(dto) else GDELT_TS % q)
-        for attempt in (0, 1):                     # one retry on 429 / transient
+
+        async def call() -> tuple[list[dict[str, Any]], dict[str, Any]]:
             try:
                 raw = (await self._get(client, url)).strip()
                 if not raw or raw[0] not in "{[":
@@ -226,32 +372,64 @@ class NewsSearch:
                                     "when": (a.get("seendate") or "")[:8], "via": "GDELT"})
                 return out, _ok("GDELT", len(out))
             except Exception as exc:  # noqa: BLE001
-                msg = str(exc)
-                if attempt == 0 and ("429" in msg or "timeout" in msg.lower()):
-                    await asyncio.sleep(1.0)
-                    continue
                 # Log the friendly reason ONCE. Google News + Bing already cover the
                 # search, so a permanently rate-limited GDELT must not fill the log.
                 if not self._gdelt_warned:
                     self._gdelt_warned = True
                     log.warning("pulse_gdelt_unavailable", extra={
-                        "error": msg,
+                        "error": str(exc),
                         "note": "results come from Google News + Bing; "
                                 "set PULSE_DISABLE_GDELT=1 to silence"})
                 return [], _failed("GDELT", exc)
-        return [], _failed("GDELT", "no answer after a retry")
+        return await self._gated("GDELT", gated, max_wait, call)
 
     @staticmethod
     def _norm(t: str) -> str:
         return re.sub(r"[^a-z0-9]+", "", (t or "").lower())[:60]
 
-    async def _fetch_merge(self, term: str, dfrom: str, dto: str,
-                           limit: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    async def _fetch_merge(self, term: str, dfrom: str, dto: str, limit: int,
+                           strict: bool = False, context: str = "",
+                           names: list[str] | None = None, bulk: bool = False,
+                           ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """``bulk`` (a sweep or a digest — many terms in a row) asks GDELT only when it
+        has a free slot rather than queueing every term behind its 5-second limit.
+
+        ``strict`` is how a NAME is searched (a firm, a director) as opposed to a
+        topic: each of the firm's names (``names``, the term when absent — see names.py)
+        is searched in quotes on its own; ``context`` (a city) rides along unquoted to narrow a
+        common name; and only articles that print one of the names, inside the window,
+        are kept. A topic search ("solar tariff") stays loose."""
         client = await self._http()
+        wanted = [n for n in (names or [term]) if n.strip()] or [term]
+        ctx = f" {context}" if context else ""
+        if not strict:
+            queries = [term]
+        else:
+            # Bing answers ZERO results to any query with OR in it (checked live: '"Enerparc
+            # Energy" OR "Enerparc"' -> 0 items, '"Enerparc"' -> 14), so each name is its
+            # own query. A name containing another adds nothing — every article printing
+            # "Enerparc Energy" prints "Enerparc" — so only the shortest forms are asked.
+            low = [w.lower() for w in wanted]
+            queries = [f'"{w}"{ctx}' for i, w in enumerate(wanted)
+                       if not any(j != i and low[j] in low[i] and (low[j] != low[i] or j < i)
+                                  for j in range(len(wanted)))]
+        phrase = " OR ".join(f'"{n}"' for n in wanted)
+        gq = (f"({phrase})" if len(wanted) > 1 else phrase) + ctx
+
+        async def each(fetch: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+            """One source over every query: the items merged, and the source counted as
+            searched if any query reached it (else the first failure is its status)."""
+            got = await asyncio.gather(*(fetch(client, q, dfrom, dto) for q in queries))
+            items = [i for its, _ in got for i in its]
+            ok = [st for _, st in got if st.get("ok")]
+            status = ({**ok[0], "count": len(items)} if ok else got[0][1])
+            return items, status
+
         (google, s_google), (gdelt, s_gdelt), (bing, s_bing) = await asyncio.gather(
-            self._google(client, term, dfrom, dto),
-            self._gdelt(client, term, dfrom, dto),
-            self._bing(client, term, dfrom, dto))
+            each(self._google),
+            self._gdelt(client, term, dfrom, dto, gq.strip() if strict else "",
+                        max_wait=0.0 if bulk or strict else None),
+            each(self._bing))
         sources = [s_google, s_gdelt, s_bing]
         log.info("pulse_search_sources", extra={"term": term, "google": len(google),
                                                 "gdelt": len(gdelt), "bing": len(bing),
@@ -269,6 +447,17 @@ class NewsSearch:
                 continue
             seen.add(key)
             merged.append(h)
+        if strict:
+            kept = []
+            for h in merged:
+                hit = next((n for n in wanted if mentions(h, n)), None)
+                if hit is not None and in_window(h, dfrom, dto):
+                    # Which name it was found under: a card matched only on a short name
+                    # says so, so a namesake ("nSure.ai" for NSure Energy) is seen as one.
+                    kept.append({**h, "matched": hit})
+            log.info("pulse_search_strict", extra={"term": term, "fetched": len(merged),
+                                                   "kept": len(kept)})
+            merged = kept
         merged.sort(key=lambda h: h.get("when") or "0", reverse=True)
         return merged[:limit], sources
 
@@ -282,12 +471,17 @@ class NewsSearch:
         return [{**a, **triage(a.get("title", ""), live).as_dict()} for a in articles]
 
     async def search(self, term: str, dfrom: str = "", dto: str = "",
-                     limit: int = 40, live: bool = False) -> list[dict[str, Any]]:
+                     limit: int = 40, live: bool = False, *, strict: bool = False,
+                     context: str = "", names: list[str] | None = None,
+                     ) -> list[dict[str, Any]]:
         """Just the articles — what the digest and the schedules want."""
-        return (await self.search_detail(term, dfrom, dto, limit, live))[0]
+        return (await self.search_detail(term, dfrom, dto, limit, live, strict=strict,
+                                         context=context, names=names))[0]
 
     async def search_detail(self, term: str, dfrom: str = "", dto: str = "",
-                            limit: int = 40, live: bool = False,
+                            limit: int = 40, live: bool = False, *,
+                            strict: bool = False, context: str = "",
+                            names: list[str] | None = None, bulk: bool = False,
                             ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """Articles AND how each source fared.
 
@@ -297,7 +491,10 @@ class NewsSearch:
         term = (term or "").strip()
         if not term:
             return [], []
-        key = f"{term.lower()}|{dfrom or ''}|{dto or ''}"
+        context = (context or "").strip()
+        key = (f"{term.lower()}|{dfrom or ''}|{dto or ''}"
+               + (f"|strict|{context.lower()}|{'|'.join(names or []).lower()}"
+                  if strict else ""))
         hit = self._cache.get(key)
         if hit and time.time() - hit[0] < self.cache_ttl_s:
             self._cache.move_to_end(key)
@@ -311,7 +508,8 @@ class NewsSearch:
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
         self._inflight[key] = fut
         try:
-            merged, sources = await self._fetch_merge(term, dfrom, dto, limit)
+            merged, sources = await self._fetch_merge(term, dfrom, dto, limit,
+                                                      strict, context, names, bulk)
             # Only a search that actually reached something is worth remembering: cache
             # a total outage for 15 minutes and the radar stays blind long after the
             # network comes back.
@@ -332,7 +530,7 @@ class NewsSearch:
 
     async def sweep(self, terms: list[str], *, dfrom: str = "", dto: str = "",
                     limit: int = 40, live_terms: set[str] | None = None,
-                    concurrency: int = 6) -> list[dict[str, Any]]:
+                    concurrency: int = 6, strict: bool = False) -> list[dict[str, Any]]:
         """Search MANY terms at once, server-side.
 
         The sweep is what the radar is for — four hundred firms, asked in one go — and
@@ -362,7 +560,8 @@ class NewsSearch:
             async with gate:
                 try:
                     articles, sources = await self.search_detail(
-                        term, dfrom, dto, limit, term in live)
+                        term, dfrom, dto, limit, term in live, strict=strict,
+                        names=watch_names(term) if strict else None, bulk=True)
                 except Exception as exc:  # noqa: BLE001 — one bad term never ends a sweep
                     log.warning("pulse_sweep_term_failed",
                                 extra={"term": term, "error": str(exc)})
@@ -408,9 +607,9 @@ class NewsSearch:
                         "ms": int((time.time() - t0) * 1000)})
 
         await asyncio.gather(
-            timed("Google News", self._google(client, term, "", "")),
-            timed("GDELT", self._gdelt(client, term, "", "")),
-            timed("Bing News", self._bing(client, term, "", "")))
+            timed("Google News", self._google(client, term, "", "", gated=False)),
+            timed("GDELT", self._gdelt(client, term, "", "", gated=False)),
+            timed("Bing News", self._bing(client, term, "", "", gated=False)))
         out.sort(key=lambda s: str(s.get("name")))
         reachable = [s for s in out if s["ok"] and not s.get("note")]
         return {

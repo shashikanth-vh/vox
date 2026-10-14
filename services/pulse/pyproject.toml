@@ -30,6 +30,11 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["app*"]
 
+# The News Radar's word list ships inside the package: without it an installed copy
+# (anything not run from the source tree) silently has no short names.
+[tool.setuptools.package-data]
+"app.news" = ["data/*"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"

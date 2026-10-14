@@ -49,6 +49,120 @@ def test_any_hard_trigger_hit_forces_red_whatever_the_score():
     assert g["score"] == 90 and g["rating"] == "RED" and g["label"] == "RED"
 
 
+def test_a_numeric_trigger_whose_evidence_disproves_it_is_not_honoured():
+    # Seen in the field: the bureau trigger fired on promoter scores of
+    # 742/752/806/861, none of which is below 650. The real finding was a
+    # delinquency flag, which belongs to pillar B, not a RED override.
+    g = rg.enforce({"pillars": _pillars(A=8, B=8, C=8, D=8, E=8, F=8, G=8),
+                    "hard_triggers": [{
+                        "trigger": "CIBIL consumer score < 650 for promoters",
+                        "status": "hit",
+                        "evidence": "Promoter R. Mehta: CIBIL 742, presence of "
+                                    "delinquency; others 752, 806, 861."}]})
+    assert g["rating"] == "GREEN", "a disproved trigger must not force RED"
+    assert g["hard_triggers"][0]["status"] == "Unknown"
+    assert "NOT HONOURED" in g["hard_triggers"][0]["evidence"]
+    assert any("does not meet the threshold" in a for a in g["adjustments"])
+
+
+def test_a_numeric_trigger_its_evidence_supports_still_forces_red():
+    g = rg.enforce({"pillars": _pillars(A=9, B=9, C=9, D=9, E=9, F=9, G=9),
+                    "hard_triggers": [{
+                        "trigger": "CIBIL consumer score < 650 for promoters",
+                        "status": "hit",
+                        "evidence": "Promoter A: CIBIL 612; promoter B: 780."}]})
+    assert g["rating"] == "RED" and g["hard_triggers"][0]["status"] == "Hit"
+
+
+def test_a_commercial_rank_trigger_is_read_on_the_cmr_scale():
+    clear = rg.enforce({"pillars": _pillars(A=8, B=8, C=8, D=8, E=8, F=8, G=8),
+                        "hard_triggers": [{"trigger": "CIBIL commercial rank 8-10",
+                                           "status": "hit",
+                                           "evidence": "Entity rank CMR-3 (low risk)."}]})
+    assert clear["rating"] == "GREEN"
+    hit = rg.enforce({"pillars": _pillars(A=8, B=8, C=8, D=8, E=8, F=8, G=8),
+                      "hard_triggers": [{"trigger": "CIBIL commercial rank 8-10",
+                                         "status": "hit",
+                                         "evidence": "Entity rank CMR-9."}]})
+    assert hit["rating"] == "RED"
+
+
+def test_a_trigger_citing_no_figures_is_left_to_the_consensus_rule():
+    # No number to check means "cannot verify here", not "disproved".
+    g = rg.enforce({"pillars": _pillars(A=8, B=8, C=8, D=8, E=8, F=8, G=8),
+                    "hard_triggers": [{"trigger": "Insolvency/NCLT proceedings",
+                                       "status": "hit",
+                                       "evidence": "NCLT petition admitted."}]})
+    assert g["rating"] == "RED" and g["hard_triggers"][0]["status"] == "Hit"
+
+
+# The first STEP 1 trigger exactly as the rubric writes it — the contract asks the model
+# to return each trigger "as written in STEP 1", so this is the usual wording in production.
+STEP1_BUREAU = ("Wilful defaulter / NPA / SMA-2 / write-off / settlement, or CIBIL "
+                "(commercial) rank 8–10 or consumer score < 650 for promoters")
+
+
+def test_the_trigger_check_reads_the_models_own_spacing():
+    # The live reading that started this wrote "<650" with no space; the check must
+    # still run, or the false RED it was written to stop goes straight through.
+    g = rg.enforce({"pillars": _pillars(A=8, B=8, C=8, D=8, E=8, F=8, G=8),
+                    "hard_triggers": [{
+                        "trigger": "CIBIL consumer score <650 for promoters",
+                        "status": "Hit",
+                        "evidence": "Promoter R. Mehta: CIBIL 742, 'Presence of "
+                                    "Delinquency in Credit History'; Overdue accounts: 2."}]})
+    assert g["rating"] == "GREEN" and g["hard_triggers"][0]["status"] == "Unknown"
+
+
+def test_a_combined_trigger_hit_on_its_non_numeric_clause_still_forces_red():
+    # SMA-2 is a hit on its own; promoter scores above 650 do not disprove it.
+    g = rg.enforce({"pillars": _pillars(A=9, B=9, C=9, D=9, E=9, F=9, G=9),
+                    "hard_triggers": [{
+                        "trigger": STEP1_BUREAU, "status": "Hit",
+                        "evidence": "BOI CC account classified SMA-2 in Aug 2026; promoter "
+                                    "CIBIL scores 720 and 780."}]})
+    assert g["rating"] == "RED" and g["hard_triggers"][0]["status"] == "Hit"
+
+
+def test_a_combined_trigger_resting_only_on_disproved_scores_is_not_honoured():
+    g = rg.enforce({"pillars": _pillars(A=8, B=8, C=8, D=8, E=8, F=8, G=8),
+                    "hard_triggers": [{
+                        "trigger": STEP1_BUREAU, "status": "Hit",
+                        "evidence": "Promoter CIBIL scores 861, 806, 752, 742; entity CMR-3."}]})
+    assert g["rating"] == "GREEN" and g["hard_triggers"][0]["status"] == "Unknown"
+
+
+def test_restating_the_threshold_is_not_a_score_that_disproves_it():
+    # "below 650" quotes the rule, not a score: no figure to check, so the Hit stands.
+    g = rg.enforce({"pillars": _pillars(A=8, B=8, C=8, D=8, E=8, F=8, G=8),
+                    "hard_triggers": [{
+                        "trigger": "CIBIL consumer score < 650 for promoters",
+                        "status": "Hit",
+                        "evidence": "One promoter's CIBIL score is below 650."}]})
+    assert g["rating"] == "RED" and g["hard_triggers"][0]["status"] == "Hit"
+
+
+def test_amounts_near_a_score_are_not_read_as_bureau_scores():
+    # ₹ figures are not CIBIL scores: an overdue of ₹ 700 must not "disprove" a hit.
+    g = rg.enforce({"pillars": _pillars(A=8, B=8, C=8, D=8, E=8, F=8, G=8),
+                    "hard_triggers": [{
+                        "trigger": "CIBIL consumer score < 650 for promoters",
+                        "status": "Hit",
+                        "evidence": "Promoter B's bureau report shows overdue ₹ 700 on a "
+                                    "card; score not legible in the copy provided."}]})
+    assert g["rating"] == "RED" and g["hard_triggers"][0]["status"] == "Hit"
+
+
+def test_a_red_from_a_trigger_is_provisional_when_the_file_is_partial():
+    p = _pillars(A=8, B=8, C=8, D=8, E=8, F=8, G=8)
+    p[0]["available"] = False  # no financials
+    g = rg.enforce({"pillars": p,
+                    "hard_triggers": [{"trigger": "NCLT", "status": "hit",
+                                       "evidence": "petition admitted"}]})
+    assert g["rating"] == "RED" and g["provisional"]
+    assert g["label"] == "RED – PROVISIONAL"
+
+
 def test_missing_financials_caps_green_at_amber_provisional():
     p = _pillars(A=9, B=9, C=9, D=9, E=9, F=9, G=9)
     p[0]["available"] = False
@@ -213,7 +327,8 @@ async def test_the_route_grades_with_the_rubric_and_the_companys_data(monkeypatc
     assert g["inputs"]["document_note"] == "document AI not configured"
     assert g["usage"]["calls"] == 3 and g["usage"]["input_tokens"] == 3000   # 3 runs
     assert [r["score"] for r in g["runs"]] == [g["score"]] * 3
-    assert g["confidence_pct"] == round(0.6 * 70 + 0.4 * 100)     # A had no data
+    # A had no data, and C has no lender outcomes on record: 55% of the weight.
+    assert g["confidence_pct"] == round(0.6 * 55 + 0.4 * 100)
     call = completions.calls[0]
     assert call["model"] == "zai.glm-5"
     system, user = call["messages"][0]["content"], call["messages"][1]["content"]
@@ -311,9 +426,111 @@ def test_the_kind_of_file_decides_whether_financials_and_banking_have_data():
     assert not g["provisional"]
 
 
+def test_market_validation_and_engagement_need_an_atlas_record_behind_them():
+    # a live grade, 6 Oct: no lender outcomes on record, yet every reading scored C from two
+    # purchase orders. With nothing in ATLAS behind C or F they cannot have data.
+    bare = {"stats": {}, "syndication": [], "asset_monetisation": [], "interactions": [],
+            "contacts": []}
+    assert set(rg.structural_gaps(bare)) == {"C", "F"}
+    live = {**bare, "syndication": [{"lender": "SIDBI", "status": "IP"}],
+            "stats": {"last_touch": "2026-09-30"}}
+    assert rg.structural_gaps(live) == {}
+    raws = [_reading(A=6, B=6, C=5, D=7, E=8, F=5, G=6) for _ in range(3)]
+    g = rg.aggregate(raws, None, rg.structural_gaps(bare))
+    assert not g["pillars"][2]["available"] and not g["pillars"][5]["available"]
+    assert g["score"] == 64                  # A 6, B 6, D 7, E 8, G 6 over 75% of the weight
+    assert any("Pillar C (Market validation) counted as without data" in a
+               for a in g["adjustments"])
+
+
 def test_a_no_data_zero_never_drags_a_pillar():
     raws = [_reading(A=6, B=6, C=7, D=6, E=6, F=6, G=6),
             _reading(A=6, B=6, C=7, D=6, E=6, F=6, G=6),
             _reading(A=6, B=6, C=0, D=6, E=6, F=6, G=6)]
     raws[2]["pillars"][2]["available"] = False
     assert rg.aggregate(raws)["pillars"][2]["score"] == 7
+
+
+# --------------------------------------------------------------------------- facts
+def test_a_trigger_prism_verified_in_a_file_forces_red():
+    g = rg.aggregate([_reading(A=8, B=8, C=8, D=8, E=8, F=8, G=8)] * 3)
+    g["hard_triggers"] = [{"trigger": STEP1_BUREAU, "status": "Clear", "evidence": "CMR-3"}]
+    out = rg.apply_verified(g, {"triggers": [{"clause": "commercial rank 8–10",
+                                             "evidence": "Entity CIBIL rank CMR-9 (W-1.pdf)"}]})
+    assert out["rating"] == "RED" and out["label"] == "RED"
+    assert out["hard_triggers"][0]["status"] == "Hit"
+    assert out["hard_triggers"][0]["evidence"].startswith("Verified by PRISM in the file")
+    assert any("verified by PRISM" in a for a in out["adjustments"])
+
+
+def test_a_clear_resting_on_a_file_that_was_not_read_is_unverified():
+    # Live, 6 Oct: "GST returns uploaded (GSTR3B Reports.zip)" cleared the statutory
+    # trigger — the zip had never been opened.
+    g = rg.aggregate([_reading(A=6, B=6, C=6, D=6, E=6, F=6, G=6)] * 3)
+    g["hard_triggers"] = [
+        {"trigger": "Statutory dues default", "status": "Clear",
+         "evidence": "GST returns uploaded (GSTR3B Reports.zip)."},
+        {"trigger": "Promoter KYC unverifiable", "status": "Clear",
+         "evidence": "Director KYC.zip uploaded; partnership deed (Deed.pdf) read."}]
+    out = rg.apply_verified(g, {"unread_files": ["GSTR3B Reports.zip", "Director KYC.zip"],
+                                "read_files": ["Deed.pdf"]})
+    gst, kyc = out["hard_triggers"]
+    assert gst["status"] == "Unknown" and "UNVERIFIED" in gst["evidence"]
+    assert kyc["status"] == "Clear"              # a file that WAS read backs it
+    assert out["rating"] == g["rating"]          # Unknown never moves the band
+
+
+def test_the_verified_facts_reach_the_grader_with_the_unread_files():
+    text = rg.build_client_data(PANORAMA, [], [], rg.date(2026, 10, 6), facts={
+        "flags": [{"severity": "red", "area": "Banking", "title": "BOI CC overdrawn",
+                   "detail": "15 day(s).", "source": "BOI BSA.xlsx"}],
+        "key_figures": {"source": "CMA.xlsx", "unit": "₹ lakh", "years": ["2026 (Prov)"],
+                        "rows": {"tol_tnw": {"2026 (Prov)": 3.40}}},
+        "unread_files": ["GSTR3B Reports.zip"]})
+    assert "=== VERIFIED FACTS" in text and "[RED] Banking: BOI CC overdrawn" in text
+    assert "tol_tnw: 2026 (Prov) 3.40" in text and "NOT read" in text
+    assert "GSTR3B Reports.zip" in text
+
+
+def test_a_bank_statement_analysis_is_banking_evidence():
+    assert rg.evidence_file("B", [{"name": "BOI - a7ba_BSA_Report.xlsx", "title": ""}]) \
+        == "BOI - a7ba_BSA_Report.xlsx"
+
+
+def test_a_bureau_hit_on_a_non_cibil_score_is_not_the_rubrics_trigger():
+    # a live grade, 6 Oct: given PRISM's facts, two readings fired the bureau trigger on
+    # Grameen scores of 611/638 while every promoter's CIBIL score was 742–861.
+    g = rg.aggregate([_reading(A=6, B=5, C=6, D=7, E=7, F=6, G=5)] * 3)
+    g["hard_triggers"] = [{"trigger": STEP1_BUREAU, "status": "Hit",
+                           "evidence": "Promoter R. Mehta: Grameen Score 611 (< 650)."}]
+    g["rating"], g["label"] = "RED", "RED"
+    scores = [{"person": "R. Mehta", "score": 742}, {"person": "A. Rao", "score": 861}]
+    out = rg.apply_verified(g, {"bureau_scores": scores})
+    t = out["hard_triggers"][0]
+    assert t["status"] == "Clear" and "none below 650" in t["evidence"]
+    assert out["rating"] == "AMBER" and any("Band set to AMBER" in a for a in out["adjustments"])
+    # A real sub-650 CIBIL score is never overruled, and an SMA-2 hit stands on its own.
+    grameen = {"trigger": STEP1_BUREAU, "status": "Hit",
+               "evidence": "Promoter R. Mehta: Grameen Score 611 (< 650)."}
+    low = rg.apply_verified({**g, "rating": "RED", "hard_triggers": [dict(grameen)]},
+                            {"bureau_scores": [{"person": "X", "score": 610}]})
+    assert low["hard_triggers"][0]["status"] == "Hit" and low["rating"] == "RED"
+    sma = rg.apply_verified({**g, "rating": "RED",
+                             "hard_triggers": [{"trigger": STEP1_BUREAU, "status": "Hit",
+                                                     "evidence": "BOI CC classified SMA-2."}]},
+                            {"bureau_scores": scores})
+    assert sma["hard_triggers"][0]["status"] == "Hit" and sma["rating"] == "RED"
+
+
+def test_a_condition_the_evidence_denies_is_not_cited():
+    # Live, 6 Oct: "No NPA/SMA-2/write-off" kept a bureau Hit standing on 742–861.
+    assert not rg._cites_condition("CIBIL CMR-3. No NPA/SMA-2/write-off. Scores 742, 861.")
+    assert not rg._cites_condition("Entity not classified SMA-2; no default reported.")
+    assert rg._cites_condition("BOI CC classified SMA-2 in Aug 2026.")
+    g = rg.aggregate([_reading(A=6, B=5, C=6, D=7, E=7, F=6, G=5)] * 3)
+    g["hard_triggers"] = [{"trigger": STEP1_BUREAU, "status": "Hit",
+                           "evidence": "CIBIL CMR-3. No NPA/SMA-2/write-off. Promoter consumer "
+                                       "scores: Mehta 742, Rao 861."}]
+    out = rg.apply_verified(g, {"bureau_scores": [{"person": "S", "score": 742},
+                                                  {"person": "G", "score": 861}]})
+    assert out["hard_triggers"][0]["status"] == "Clear"

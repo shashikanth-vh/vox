@@ -167,6 +167,15 @@ export interface RiskGrade {
              weighted: number; available: boolean; evidence: string }[];
   hard_triggers: { trigger: string; status: 'Hit' | 'Clear' | 'Unknown';
                    evidence: string }[];
+  /** What PRISM read itself from the files (not the model): red flags with their
+   *  source, the CMA's key figures, and how much of the file the grade stands on.
+   *  Absent on grades saved before 6 Oct 2026. */
+  evidence?: {
+    flags: RiskFlag[];
+    key_figures: { source: string; unit: string; years: string[];
+                   rows: Record<string, Record<string, number>> } | null;
+    coverage: RiskCoverage[];
+  };
   risks: string[]; mitigants: string[]; data_gaps: string[];
   move_up: string; move_down: string;
   action: string; conditions: string[];
@@ -191,6 +200,14 @@ export interface RiskGrade {
                           engines: string[]; reason?: string; cached?: boolean;
                           note?: string }[] };
 }
+
+export interface RiskFlag { severity: 'red' | 'amber' | 'info'; area: string; title: string;
+  detail: string; source: string; trigger?: string }
+
+export interface RiskCoverage { area: string;
+  status: 'read' | 'partly read' | 'not read' | 'no file' | 'none found';
+  read: string[]; unread: { name: string; reason: string }[];
+  checked_by_prism?: boolean; note?: string }
 
 export interface RiskNewsIn { headline: string; source?: string; when?: string;
   severity?: string }

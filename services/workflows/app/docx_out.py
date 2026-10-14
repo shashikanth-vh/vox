@@ -229,6 +229,124 @@ def _is_separator(line: str) -> bool:
     return bool(body) and all(re.fullmatch(r'\s*:?-{3,}:?\s*', c) for c in body.split('|'))
 
 
+# ---- the CAM cover page ---------------------------------------------------- #
+# The drafter writes the title block as plain lines under "# Credit Appraisal
+# Memorandum" (lender, borrower, constitution, facility, terms, dates, preparer).
+# Rendered as body text the borrower's name was a 10.5pt line under the lender's —
+# the committee reads the cover for WHO, so the borrower leads and the lender signs.
+_COVER_H1 = re.compile(r'^#\s+credit appraisal memorandum\s*$', re.I)
+_COVER_FACTS = ('document date', 'financial data', 'banking data', 'debtor data',
+                'debt data', 'prepared by')
+
+
+def _cover_run(text: str, *, size: int, bold: bool = False, color: str | None = None,
+               caps: bool = False, spacing: int = 0) -> str:
+    rpr = ('<w:rPr>' + ('<w:b/>' if bold else '') + ('<w:caps/>' if caps else '')
+           + (f'<w:spacing w:val="{spacing}"/>' if spacing else '')
+           + (f'<w:color w:val="{color}"/>' if color else '')
+           + f'<w:sz w:val="{size}"/><w:szCs w:val="{size}"/></w:rPr>')
+    return f'<w:r>{rpr}<w:t xml:space="preserve">{escape(text)}</w:t></w:r>'
+
+
+def _cover_p(runs: str, *, before: int = 0, after: int = 120, border: str | None = None,
+             fill: str | None = None, indent: int = 0) -> str:
+    return ('<w:p><w:pPr>'
+            + (f'<w:pBdr><w:bottom w:val="single" w:sz="12" w:space="8" w:color="{border}"/>'
+               '</w:pBdr>' if border else '')
+            + (f'<w:shd w:val="clear" w:fill="{fill}"/>' if fill else '')
+            + f'<w:spacing w:before="{before}" w:after="{after}"/>'
+            + (f'<w:ind w:left="{indent}" w:right="{indent}"/>' if indent else '')
+            + f'</w:pPr>{runs}</w:p>')
+
+
+def _cover_fact(piece: str) -> tuple[str, str]:
+    """'Prepared by: X' and 'Banking data as of Jul-2026' alike → (label, value)."""
+    piece = piece.strip()
+    if ':' in piece:
+        label, _, value = piece.partition(':')
+        return label.strip(), value.strip()
+    m = re.match(r'(?i)(.*?\bas of)\s+(.+)$', piece)
+    return (m.group(1).strip(), m.group(2).strip()) if m else (piece, '')
+
+
+def _cam_cover(lines: list[str], accent: str) -> str:
+    """The title block as a cover page: eyebrow, the BORROWER large, its constitution,
+    the facility band, a facts grid (dates, preparer), the lender small at the foot."""
+    lines = [ln.strip() for ln in lines if ln.strip()]
+    lender = next((ln for ln in lines if ln.lower().startswith('evam finance')), '')
+    rest = [ln for ln in lines if ln != lender]
+    facts = [ln for ln in rest if ln.lower().startswith(_COVER_FACTS)]
+    facility = [ln for ln in rest if ln.lower().startswith('proposed facility')]
+    plain = [ln for ln in rest if ln not in facts and ln not in facility]
+    name = plain.pop(0) if plain else ''
+    profile = plain.pop(0) if plain else ''
+    terms = [ln for ln in plain if '|' in ln]
+    other = [ln for ln in plain if ln not in terms]
+    grey, ink = '595959', '262626'
+
+    out = [_cover_p(_cover_run('Credit Appraisal Memorandum', size=22, bold=True,
+                               color=accent, caps=True, spacing=40), before=1800, after=240)]
+    if name:
+        out.append(_cover_p(_cover_run(name, size=60, bold=True, color=accent, caps=True),
+                            after=120))
+    if profile:
+        out.append(_cover_p(_cover_run(profile, size=26, color=grey), after=360,
+                            border=accent))
+    for ln in facility:
+        label, _, value = ln.partition(':')
+        out.append(_cover_p(_cover_run(label.strip(), size=18, bold=True, color=grey,
+                                       caps=True, spacing=20), before=240, after=40))
+        out.append(_cover_p(_cover_run(value.strip() or ln, size=30, bold=True, color=ink),
+                            after=80))
+    for ln in terms:
+        out.append(_cover_p(_cover_run('   ·   '.join(p.strip() for p in ln.split('|')),
+                                       size=20, color=ink), after=80))
+    for ln in other:
+        out.append(_cover_p(_runs(ln), after=80))
+    if facts:
+        cell = ('<w:tc><w:tcPr><w:tcW w:w="{w}" w:type="dxa"/>'
+                '<w:tcBorders><w:bottom w:val="single" w:sz="4" w:color="D9D9D9"/></w:tcBorders>'
+                '<w:tcMar><w:top w:w="80" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/>'
+                '</w:tcMar></w:tcPr>{p}</w:tc>')
+        rows = []
+        for label, value in (_cover_fact(piece) for ln in facts for piece in ln.split(';')
+                             if piece.strip()):
+            rows.append('<w:tr>'
+                        + cell.format(w=2800, p=_cover_p(_cover_run(
+                            label, size=17, bold=True, color=grey, caps=True,
+                            spacing=10), after=0))
+                        + cell.format(w=6800, p=_cover_p(_runs(value), after=0))
+                        + '</w:tr>')
+        out.append('<w:p><w:pPr><w:spacing w:before="480" w:after="0"/></w:pPr></w:p>')
+        out.append('<w:tbl><w:tblPr><w:tblW w:w="9600" w:type="dxa"/>'
+                   '<w:tblLayout w:type="fixed"/></w:tblPr>'
+                   '<w:tblGrid><w:gridCol w:w="2800"/><w:gridCol w:w="6800"/></w:tblGrid>'
+                   + ''.join(rows) + '</w:tbl>')
+    if lender:
+        out.append(_cover_p(_cover_run(lender, size=20, bold=True, color=accent),
+                            before=1200, after=0))
+        out.append(_cover_p(_cover_run('Credit Risk Group  ·  Strictly confidential',
+                                       size=17, color=grey), after=0))
+    out.append(_PAGE_BREAK)
+    return ''.join(out)
+
+
+def _split_cover(md: str) -> tuple[list[str] | None, str]:
+    """(title-block lines, the rest) when the draft opens with the CAM's title block;
+    (None, md) otherwise — any other document renders exactly as before."""
+    lines = md.replace('\r\n', '\n').split('\n')
+    start = next((n for n, ln in enumerate(lines) if ln.strip()), None)
+    if start is None or not _COVER_H1.match(lines[start].strip()):
+        return None, md
+    end = start + 1
+    while end < len(lines) and not lines[end].lstrip().startswith('#'):
+        end += 1
+    block = [ln for ln in lines[start + 1:end] if ln.strip()]
+    if not block:
+        return None, md
+    return block, '\n'.join(lines[end:])
+
+
 def _render_body(md: str, title: str | None = None, *,
                  letterhead: bool = False, accent: str = _NAVY, cam: bool = False) -> str:
     """Markdown → the <w:body> INNER XML (no sectPr) — shared by the standalone
@@ -251,7 +369,11 @@ def _render_body(md: str, title: str | None = None, *,
         gap = False
         body.append(x)
 
-    if title:
+    cover, md = _split_cover(md) if cam else (None, md)
+    if cover is not None:
+        # The cover carries the borrower; the export's file title would only repeat it.
+        body.append(_cam_cover(cover, _CAM_HEAD))
+    elif title:
         emit(_p(title, style="Title"))
 
     lines = md.replace('\r\n', '\n').split('\n')

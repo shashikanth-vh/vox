@@ -35,6 +35,46 @@ async def test_entity_tags_roundtrip(client: AsyncClient):
     assert "Core 33" in got.json()["tags"]
 
 
+async def test_entity_key_people_roundtrip_and_validation(client: AsyncClient):
+    """The directors the News Radar watches live on the company: created, edited with
+    a PATCH, read back in order — and a nameless row is refused, not stored."""
+    r = await client.post("/v1/entities", json={
+        "code": "KEYPPL", "legal_name": "Keypeople Batteries",
+        "key_people": [{"name": "Asha Rao", "role": "Director", "city": "Coimbatore"}],
+    })
+    assert r.status_code == 201, r.text
+    eid = r.json()["id"]
+    assert r.json()["key_people"] == [
+        {"name": "Asha Rao", "role": "Director", "city": "Coimbatore"}]
+    p = await client.patch(f"/v1/entities/{eid}", json={
+        "key_people": [{"name": "Asha Rao", "role": "Director", "city": "Coimbatore"},
+                       {"name": "Vikram Iyer", "role": "Promoter"}]})
+    assert p.status_code == 200, p.text
+    got = (await client.get(f"/v1/entities/{eid}")).json()["key_people"]
+    assert [k["name"] for k in got] == ["Asha Rao", "Vikram Iyer"]
+    bad = await client.post("/v1/entities", json={
+        "code": "KEYBAD", "legal_name": "Bad", "key_people": [{"role": "Director"}]})
+    assert bad.status_code == 422
+
+
+async def test_entity_news_names_and_watch_flag_roundtrip(client: AsyncClient):
+    """The press names a firm by its short name, and some records are not firms at all:
+    both are kept on the company for the News Radar. An alias that is not a word is
+    refused, since "&" would match every headline."""
+    r = await client.post("/v1/entities", json={
+        "code": "ENRPRC", "legal_name": "Enerparc Energy Pvt Ltd",
+        "news_aliases": [" Enerparc "]})
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["news_aliases"] == ["Enerparc"] and body["news_watch"] is None
+    eid = body["id"]
+    p = await client.patch(f"/v1/entities/{eid}", json={"news_watch": False})
+    assert p.status_code == 200, p.text
+    assert (await client.get(f"/v1/entities/{eid}")).json()["news_watch"] is False
+    bad = await client.patch(f"/v1/entities/{eid}", json={"news_aliases": ["&"]})
+    assert bad.status_code == 422
+
+
 async def test_lending_disbursement_fields(client: AsyncClient):
     eid = await _entity(client, "LEND1")
     r = await client.post("/v1/lending", json={
@@ -284,6 +324,7 @@ async def test_entity_create_field_names_are_pinned(client: AsyncClient):
         "code", "legal_name", "display_name", "entity_type", "cin", "pan", "gstin",
         "sector", "sub_sector", "lens", "state", "location", "city", "country", "address",
         "register_status", "lifecycle", "promoter_group_code", "about", "toi", "notes", "tags",
+        "key_people", "news_aliases", "news_watch",   # News Radar (0030)
     }
     # And the body the orchestrator actually sends is accepted.
     r = await client.post("/v1/entities", json={

@@ -89,10 +89,13 @@ class Settings(BaseServiceSettings):
     chitti_api_key: str = ""
     chitti_timeout_s: float = 300.0
     # What a grade reads beyond the panorama: the Data Register files in these sections
-    # (text through DocRAG, budgeted per file and per grade), and PULSE's news.
-    risk_grade_doc_sections: str = "Financials,Banking & Debt"
+    # (text through DocRAG, budgeted per file and per grade), and PULSE's news. The
+    # bureau reports and KYC live in their own sections: a grade that cannot see them
+    # can never clear the bureau or KYC triggers honestly.
+    risk_grade_doc_sections: str = ("Financials,Banking & Debt,Compliance & Bureau,"
+                                    "KYC & Constitutional")
     risk_grade_doc_max_chars: int = 40_000
-    risk_grade_docs_total_chars: int = 200_000
+    risk_grade_docs_total_chars: int = 280_000
     pulse_url: str = ""
     pulse_api_key: str = ""
     # DocRAG on another host (the Chitti split) sits behind that host's HTTPS edge with a

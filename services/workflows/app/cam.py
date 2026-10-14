@@ -13,8 +13,9 @@ CAM version records which engine drafted it. Today: Anthropic (Haiku by default)
 deterministic stub when no key is configured — dev and CI run the whole lifecycle
 without a vendor account. Adding a provider is one class + a config value.
 
-**Documents.** Text-like documents (markdown, txt, csv, json, html) are read whole;
-DOCX is unzipped and stripped of markup (stdlib); PDF goes through pypdf. All per-doc
+**Documents.** Text-like documents (markdown, txt, csv, json) are read whole; HTML
+is reduced to its text (a bureau report is mostly styles and inline images); DOCX
+is unzipped and stripped of markup (stdlib); PDF goes through pypdf. All per-doc
 bounded. A format that still cannot be read — or a scan with no text layer — is
 SKIPPED AND SAID SO: the response names what went in and what did not, because a CAM
 that silently omits a document it claims to cover is worse than one that refuses.
@@ -23,6 +24,7 @@ Extraction lives in ``extract_text``; adding a format is one branch there.
 
 from __future__ import annotations
 
+import datetime as _dt
 import re
 import time as _time
 from typing import Any
@@ -46,6 +48,14 @@ def extract_text(ctype: str, blob: bytes) -> tuple[str, str | None]:
     because a CAM that silently omits a document it claims to cover is worse than one
     that refuses."""
     ctype = (ctype or "").lower()
+    # HTML before the generic text branch: a bureau report (CIBIL's CIR) is ~800 KB of
+    # styles and base64 images around ~20 KB of text — read raw, the per-document cap
+    # cut it off before the score. Sniffed too, since uploads often arrive unlabelled.
+    if is_html(ctype, blob):
+        text = html_text(blob)
+        if text.strip():
+            return text, None
+        return "", "the HTML page contains no text"
     if any(ctype.startswith(t) for t in _TEXT_TYPES):
         return blob.decode("utf-8", "ignore"), None
     if ctype.startswith(_DOCX_TYPE) or (blob[:2] == b"PK" and b"word/" in blob[:4096]):
@@ -110,6 +120,8 @@ def doc_format(ctype: str, blob: bytes) -> str:
         return "docx"
     if (suffix := image_suffix(ctype, blob)) is not None:
         return suffix.lstrip(".")
+    if is_html(ctype, blob):
+        return "html"
     if any(ctype.startswith(t) for t in _TEXT_TYPES):
         return "text"
     return ctype.split(";")[0] or "unknown"
@@ -117,6 +129,15 @@ def doc_format(ctype: str, blob: bytes) -> str:
 
 # The marker reason for a PDF with no text layer — a SCAN. Not a dead end: an engine
 # that reads documents visually (Anthropic's PDF support) is handed the file itself.
+# What the CAM writers are given of the Register's records (see _deal_context).
+_LENDING_FIELDS = ("tracker_no", "amount_cr", "proposed_disbursement_amount",
+                   "proposed_disbursement_date", "stage", "rm", "analyst", "sanction_date",
+                   "remarks")
+_ENTITY_FIELDS = ("legal_name", "display_name", "entity_type", "cin", "pan", "gstin",
+                  "sector", "sub_sector", "state", "location", "promoter_group_code", "about")
+_DEAL_FIELDS = ("deal_no", "product_type", "lens", "stage", "rm", "analyst", "source",
+                "date_received", "remarks")
+
 _SCANNED_PDF = "the PDF has no text layer (a scan)"
 _SCANNED_IMAGE = "the image produced no text"
 _PDF_ATTACH_MAX_BYTES = 10 * 1024 * 1024   # Anthropic's request cap is 32MB total
@@ -125,6 +146,80 @@ _PDF_ATTACH_MAX_DOCS = 4                   # …and ~100 pages across attached P
 
 def is_pdf(ctype: str, blob: bytes) -> bool:
     return (ctype or "").lower().startswith("application/pdf") or blob[:5] == b"%PDF-"
+
+
+_HTML_TYPES = ("text/html", "application/xhtml")
+_HTML_DROP = re.compile(r"(?is)<(script|style|noscript|svg|template)\b[^>]*>.*?</\1\s*>"
+                        r"|<!--.*?-->")
+_HTML_BREAK = re.compile(r"(?i)<(?:br|/?(?:p|div|tr|li|ul|ol|table|thead|tbody|section|"
+                         r"article|header|footer|h[1-6]|title))\b[^>]*>")
+_HTML_CELL = re.compile(r"(?i)</t[dh]\s*>")
+
+
+def _html_decode(blob: bytes) -> str:
+    if blob[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        return blob.decode("utf-16", "ignore")
+    return blob.decode("utf-8-sig", "ignore")
+
+
+def is_html(ctype: str, blob: bytes) -> bool:
+    """HTML by label, or by its opening bytes when the label is generic (a CIR saved
+    from the bureau portal opens with an XML declaration, then <html>)."""
+    ctype = (ctype or "").lower()
+    if ctype.startswith(_HTML_TYPES):
+        return True
+    if ctype and not ctype.startswith(("application/octet-stream", "text/plain",
+                                       "application/xml", "text/xml")):
+        return False
+    head = _html_decode(blob[:2048]).lstrip().lower()
+    return head.startswith(("<!doctype html", "<html")) or (
+        head.startswith("<?xml") and "<html" in head)
+
+
+_HTML_TABLE = re.compile(r"(?i)<table\b[^>]*>|</table\s*>")
+# A cell with no table inside it: its <div>/<p>/<br> are layout, not new lines.
+_HTML_SIMPLE_CELL = re.compile(r"(?is)(<t[dh]\b[^>]*>)((?:(?!</?t[dh]\b|<table\b).)*)")
+
+
+def _inline_layout_tables(page: str) -> str:
+    """Fold every ONE-ROW table into a single line of cells. Bureau reports wrap a
+    label and its attribute code in a one-row table nested inside the data row; left
+    alone, its row break splits the label from the value it labels."""
+    stack: list[list[str]] = [[]]
+    pos = 0
+    for m in _HTML_TABLE.finditer(page):
+        stack[-1].append(page[pos:m.start()])
+        pos = m.end()
+        if not m.group().startswith("</"):
+            stack.append([m.group()])
+            continue
+        if len(stack) == 1:                      # stray </table>: keep it, move on
+            stack[-1].append(m.group())
+            continue
+        seg = "".join(stack.pop()) + m.group()
+        if seg.lower().count("<tr") <= 1:
+            flat = re.sub(r"<[^>]+>", " ", _HTML_CELL.sub(" | ", seg))
+            seg = " " + re.sub(r"[\s|]+$", "", flat) + " "   # its last cell's separator
+        stack[-1].append(seg)
+    stack[-1].append(page[pos:])
+    while len(stack) > 1:                        # unclosed tables: keep what is there
+        tail = "".join(stack.pop())
+        stack[-1].append(tail)
+    return "".join(stack[0])
+
+
+def html_text(blob: bytes) -> str:
+    """The readable text of an HTML page: scripts, styles and inline images dropped,
+    block elements as line breaks and table cells separated, so a report's
+    label–value rows stay on one line."""
+    import html
+
+    page = _inline_layout_tables(_HTML_DROP.sub(" ", _html_decode(blob)))
+    page = _HTML_SIMPLE_CELL.sub(lambda m: m.group(1) + _HTML_BREAK.sub(" ", m.group(2)), page)
+    page = _HTML_CELL.sub(" | ", _HTML_BREAK.sub("\n", page))
+    page = html.unescape(re.sub(r"<[^>]+>", " ", page))
+    lines = (re.sub(r"[ \t\r\f\v\xa0]+", " ", ln).strip(" |") for ln in page.split("\n"))
+    return "\n".join(ln for ln in lines if ln)
 # The credit team's master prompt was written for an agent WITH tools (it asks for
 # workpapers on disk, public web checks, a generated .docx and a programmatic QA pass).
 # The workbench runs it as ONE text response, so this note tells the engine how to honour
@@ -735,6 +830,147 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
             if reason == _SCANNED_PDF:
                 blocks.append(_pdf_block(blob))
         return blocks
+
+    async def _deal_context(request: Any, caller: Any, who: str,
+                            lending_id: str) -> tuple[str, dict[str, Any] | None]:
+        """(the borrower and the line as the Register holds them, the entity row), read
+        AS the caller (a role that cannot see the entity gets no entity facts). Plain
+        "field: value" lines; empty fields are left out, an unreadable record is named."""
+        import httpx
+
+        async def read(path: str) -> dict[str, Any] | None:
+            try:
+                r = await request.app.state.http.get(
+                    f"{base}{path}", headers=_reg_headers(request, caller, who, "GET", path))
+            except httpx.HTTPError:
+                return None
+            body = r.json() if r.status_code < 300 else None
+            return body if isinstance(body, dict) else None
+
+        def lines(label: str, row: dict[str, Any] | None, keep: tuple[str, ...]) -> list[str]:
+            if row is None:
+                return [f"{label}: not readable on the Register"]
+            out = [f"{label}:"]
+            for k in keep:
+                v = row.get(k)
+                if v not in (None, "", [], {}):
+                    out.append(f"  {k}: {str(v)[:600]}")
+            return out
+
+        line = await read(f"/v1/lending/{lending_id}")
+        parts = lines("Lending line", line, _LENDING_FIELDS)
+        entity = None
+        if line and line.get("entity_id"):
+            entity = await read(f"/v1/entities/{line['entity_id']}")
+            parts += lines("Borrower (entity)", entity, _ENTITY_FIELDS)
+            if entity is not None:
+                entity = {**entity, "id": entity.get("id") or line["entity_id"]}
+        if line and line.get("deal_id"):
+            parts += lines("Deal", await read(f"/v1/deals/{line['deal_id']}"), _DEAL_FIELDS)
+        parts.append("Facility rate, tenor, availability and security are NOT stored on the "
+                     "Register before sanction: take them from the documents or the "
+                     "analyst's instructions, else write 'not on record'.")
+        return "\n".join(parts), entity
+
+    async def _public_context(request: Any, caller: Any, who: str,
+                              entity: dict[str, Any] | None) -> str:
+        """What PRISM itself holds from public sources, for the public-checks log:
+
+        * Tracxn's filings for the borrower's CIN, read AS the caller and from the
+          CACHE ONLY — a paid fetch is always someone's decision (the 360's Fetch);
+        * PULSE's news on the firm and its board (last 12 months), each headline
+          checked to actually name them.
+
+        Each source says what it is and when it was fetched, so a check can cite it;
+        an unavailable source is named, never filled in."""
+        import httpx
+
+        from app.risk_grade import _VERDICT, mentions, name_core
+
+        if entity is None:
+            return ""
+        company = str(entity.get("legal_name") or entity.get("display_name") or "")
+        out: list[str] = []
+        board: list[str] = []
+        path = "/v1/panorama/financials"
+        try:
+            r = await request.app.state.http.get(
+                f"{base}{path}", params={"entity_id": str(entity.get("id")),
+                                         "cached_only": "true"},
+                headers=_reg_headers(request, caller, who, "GET", path))
+            tx = r.json() if r.status_code < 300 else None
+            tx_note = None if r.status_code < 300 else f"HTTP {r.status_code}"
+        except (httpx.HTTPError, ValueError) as exc:
+            tx, tx_note = None, exc.__class__.__name__
+        if not isinstance(tx, dict) or not tx.get("resolved"):
+            why = (tx or {}).get("note") if isinstance(tx, dict) else None
+            if tx_note == "HTTP 409" and not why:
+                why = "not configured on this deployment, or no CIN on the borrower's record"
+            out.append(f"Tracxn (company filings): not available — {why or tx_note or 'no answer'}"
+                       ". Nothing from Tracxn can verify a check on this draft.")
+        else:
+            fetched = str(tx.get("fetched_at") or "")[:10]
+            le = tx.get("legal_entity") or {}
+            out.append(f"Tracxn (company filings, CIN {tx.get('cin')}, fetched {fetched}):")
+            out.append(f"  legal entity: {le.get('name')} · incorporated {le.get('incorporated')}"
+                       f" · status {le.get('status')}")
+            board = [str(m.get("name")) for m in tx.get("board") or [] if m.get("name")]
+            if board:
+                out.append("  board: " + "; ".join(
+                    f"{m.get('name')} ({m.get('designation') or '—'}, since {m.get('since') or '—'})"
+                    for m in (tx.get("board") or [])[:12]))
+            holders = tx.get("shareholders") or []
+            if holders:
+                out.append("  shareholders: " + "; ".join(
+                    f"{h.get('name')} {h.get('pct')}%" for h in holders[:10]))
+            for key, label in (("revenue", "revenue"), ("ebitda", "EBITDA"),
+                               ("net_profit", "net profit")):
+                pts = ((tx.get("series") or {}).get(key) or {}).get("points") or []
+                unit = ((tx.get("series") or {}).get(key) or {}).get("unit") or "unit as filed"
+                if pts:
+                    out.append(f"  {label} ({unit}, as filed — not converted): " + "; ".join(
+                        f"{p.get('fy') or p.get('year')}: {p.get('value')}" for p in pts[-4:]))
+        pulse_url = (getattr(settings, "pulse_url", "") or "").rstrip("/")
+        if not pulse_url:
+            out.append("PULSE (news): not configured on this deployment.")
+        elif company:
+            since = (_dt.date.today() - _dt.timedelta(days=365)).isoformat()
+            core = name_core(company) or company
+            items: list[str] = []
+            seen: set[str] = set()
+            failed = 0
+            terms = [(core, company, False)] + [(n, n, True) for n in board[:3]]
+            for term, about, person in terms:
+                try:
+                    r = await request.app.state.http.get(
+                        f"{pulse_url}/v1/news/search",
+                        params={"q": f'"{term}"', "from": since, "limit": 20},
+                        headers={"X-API-Key": getattr(settings, "pulse_api_key", "")},
+                        timeout=60.0)
+                    arts = (r.json() or {}).get("articles", []) if r.status_code < 300 else None
+                except (httpx.HTTPError, ValueError):
+                    arts = None
+                if arts is None:
+                    failed += 1
+                    continue
+                for a in arts:
+                    title = str(a.get("headline") or a.get("title") or "").strip()
+                    if not title or title.lower() in seen or not mentions(title, about,
+                                                                          person=person):
+                        continue
+                    seen.add(title.lower())
+                    sev = str(a.get("severity") or "").upper()
+                    items.append(f"  - {a.get('when') or '?'} · {title} — {a.get('source') or '?'}"
+                                 f" · PULSE verdict {sev or 'untagged'}"
+                                 f" ({_VERDICT.get(sev, '—')})"
+                                 + (f" · about {about}" if person else ""))
+            if failed == len(terms):
+                out.append("PULSE (news): unreachable — not checked.")
+            else:
+                out.append(f"PULSE (news, last 12 months, headlines naming the firm"
+                           f"{' or its board' if board else ''}, as of {_dt.date.today()}):")
+                out += items[:25] or ["  none found"]
+        return "\n".join(out)
 
     async def _open_report(request: Request, caller: Any, who: str,
                            lending_id: str) -> dict[str, Any] | None:
@@ -1425,6 +1661,8 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
             analyst = _conversation_notes(turns)
             if instruction:
                 analyst = f"{analyst}\n\nAnalyst's instruction for this draft: {instruction}"
+            deal, entity = await _deal_context(ctx, caller, who, str(job["lending_id"]))
+            public = await _public_context(ctx, caller, who, entity)
             master = parse_master_prompt(prompt_text)
             http = ctx.app.state.http
             template_text = ""
@@ -1444,7 +1682,9 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
                     parts.insert(0, "\n\n===== CAM TEMPLATE (reproduce its structure: the "
                                     "same sections, order and headings) =====\n"
                                     + template_text[:max_doc_chars])
-                ask = (f"{prompt_text.strip()}\n\n{analyst}".strip() + "".join(parts)
+                ask = (f"{prompt_text.strip()}\n\n===== THE DEAL ON THE REGISTER (facts of "
+                       f"record) =====\n{deal}\n\n===== PUBLIC SOURCES PRISM HOLDS "
+                       f"=====\n{public}\n\n{analyst}".strip() + "".join(parts)
                        + "\n\nPrepare the complete CAM report now, following the prompt "
                        "document's instructions exactly.")
                 scans = [b for d in docs for b in (d.blocks or [])]
@@ -1461,9 +1701,11 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
                     cache=_digests, model_id=engine.name, progress=progress,
                     concurrency=int(getattr(settings, "cam_pipeline_concurrency", 4)),
                     call_budget=int(getattr(settings, "cam_call_budget_chars", 360_000)),
-                    digest_part_chars=int(getattr(settings, "cam_digest_part_chars", 90_000)))
+                    digest_part_chars=int(getattr(settings, "cam_digest_part_chars", 90_000)),
+                    deal_context=deal, public_context=public)
                 draft, workpaper, calls = result.draft_md, result.workpaper_md, result.calls
                 notes.extend(result.notes)
+                job.update(qa=result.qa, figures=result.figures)
             await _record_turn(ctx, caller, who, report["id"], "user",
                                f"[generate — {job.get('mode')}] documents: "
                                + ", ".join(d.name for d in docs))

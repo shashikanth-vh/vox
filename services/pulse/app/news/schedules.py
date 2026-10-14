@@ -23,11 +23,17 @@ from typing import Any, Callable
 
 from evam_backend_core.logging import get_logger
 
+from app.news.names import watch_names
+
 log = get_logger("pulse.schedules")
 
 # A failed send is retried a few times, spaced out, then conceded until the next
 # regular slot — never a tight loop against the recipients' inboxes.
 MAX_RETRIES = 3
+# How long, and how many, sent stories a schedule remembers so it does not send them
+# again. Ninety days covers any digest window with room to spare.
+SENT_MEMORY_DAYS = 90
+SENT_MEMORY_MAX = 5000
 RETRY_DELAY_S = 600
 MAX_HISTORY = 10          # run outcomes kept per schedule, newest last
 
@@ -176,6 +182,32 @@ class ScheduleStore:
                     self.save(strict=False)
                     return
 
+    def sent_keys(self, sid: str) -> set[str]:
+        """The stories this schedule already sent (see run_schedule's ONLY NEW)."""
+        with self._lock:
+            for s in self._items:
+                if s.get("id") == sid:
+                    return set((s.get("sent") or {}).keys())
+        return set()
+
+    def remember_sent(self, sid: str, keys: list[str]) -> None:
+        """Note what a digest just sent. Bounded twice — by age and by count — so the
+        file stays small however long a schedule runs: a story older than the memory
+        is outside any digest window anyway."""
+        now = time.time()
+        with self._lock:
+            for s in self._items:
+                if s.get("id") == sid:
+                    sent = {k: t for k, t in (s.get("sent") or {}).items()
+                            if now - float(t) < SENT_MEMORY_DAYS * 86400}
+                    sent.update({k: now for k in keys if k})
+                    if len(sent) > SENT_MEMORY_MAX:
+                        sent = dict(sorted(sent.items(), key=lambda kv: kv[1])
+                                    [-SENT_MEMORY_MAX:])
+                    s["sent"] = sent
+                    self.save(strict=False)
+                    return
+
     def probe(self) -> tuple[bool, str]:
         """Can the store reach disk RIGHT NOW? Rewrites the file through the same
         save() every mutation uses, so the answer is the truth, not a guess. The
@@ -228,64 +260,228 @@ def trading_name(name: str) -> str:
     return s if len(s) >= 3 else original
 
 
+# Searches in flight at once. The scheduled run used to ask one name at a time — a
+# 400-firm digest was 400 serial waits on three news sources. The bound is modest on
+# purpose: Google News and Bing answer a polite client and throttle a greedy one (the
+# search engine's own upstream pool caps it again underneath).
+DIGEST_CONCURRENCY = 6
+
+
+class Watch:
+    """One firm on the watch list: its trading name, the aliases an analyst set, its
+    key people, and whether the record is watched at all."""
+
+    __slots__ = ("name", "aliases", "people", "watched")
+
+    def __init__(self, name: str, aliases: list[str] | None = None,
+                 people: list[dict[str, Any]] | None = None, watched: bool = True) -> None:
+        self.name, self.aliases = name, aliases or []
+        self.people, self.watched = people or [], watched
+
+
+def _watch_item(entry: Any) -> Watch:
+    """A firm from the register: a bare name, or ``{name, aliases, people, watch}``."""
+    if isinstance(entry, dict):
+        people = [p for p in (entry.get("people") or [])
+                  if isinstance(p, dict) and str(p.get("name") or "").strip()]
+        aliases = [str(a).strip() for a in (entry.get("aliases") or []) if str(a).strip()]
+        return Watch(trading_name(str(entry.get("name") or "")), aliases, people,
+                     entry.get("watch") is not False)
+    return Watch(trading_name(str(entry or "")))
+
+
+def _person_label(person: dict[str, Any]) -> str:
+    role = str(person.get("role") or "").strip()
+    name = str(person.get("name") or "").strip()
+    return f"{role} · {name}" if role else name
+
+
+def story_key(article: dict[str, Any]) -> str:
+    """One story, however many sources carry it: the normalised headline. Used to say
+    an article was already sent, and to spot two firms reporting the same story."""
+    return re.sub(r"[^a-z0-9]+", "", str(article.get("title") or "").lower())[:80] \
+        or str(article.get("url") or "")
+
+
+async def _search_firm(watch: Watch, search: Callable, dfrom: str, dto: str,
+                       gate: asyncio.Semaphore,
+                       ) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    """The firm's own news plus its key people's, as ONE list for one card. The firm
+    is searched under all its watch names (full name, aliases or the automatic short
+    name); a person by their name, with their city. A person's article carries
+    ``about`` (role · name) so the card can say who it is about; an article that
+    names both the firm and the person appears once.
+
+    Also answers which sources were NOT searched for the firm (source → reason): a
+    search may hand back ``(articles, sources)`` and every source that failed or was
+    skipped for the firm's own name is named, so the email can say so."""
+    down: dict[str, str] = {}
+
+    async def one(term: str, names: list[str], context: str = "",
+                  firm: bool = False) -> list[dict[str, Any]]:
+        async with gate:
+            try:
+                got = await search(term, dfrom, dto, strict=True, context=context,
+                                   names=names)
+            except Exception as exc:  # noqa: BLE001 — one name never ends a digest
+                log.warning("pulse_schedule_term_failed", extra={"term": term,
+                                                                  "error": str(exc)})
+                if firm:
+                    down["all sources"] = str(exc)[:200]
+                return []
+        if isinstance(got, tuple):
+            got, sources = got
+            if firm:
+                down.update({str(s.get("name")): str(s.get("error") or "")
+                             for s in sources or [] if not s.get("ok")})
+        return list(got)
+
+    found = await asyncio.gather(
+        one(watch.name, watch_names(watch.name, watch.aliases), firm=True),
+        *(one(str(p["name"]).strip(), [str(p["name"]).strip()],
+              str(p.get("city") or "").strip()) for p in watch.people))
+    seen: set[str] = set()
+    out: list[dict[str, Any]] = []
+    for person, arts in zip([None, *watch.people], found, strict=True):
+        for a in arts:
+            key = story_key(a)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({**a, "about": _person_label(person)} if person else a)
+    return out, down
+
+
+def merge_shared(groups: list[tuple[str, list[dict[str, Any]]]],
+                 ) -> list[tuple[str, list[dict[str, Any]]]]:
+    """Two records reporting the same stories are one firm to the reader ("Euroteck"
+    and "Euroteck Environmental"): when half or more of the smaller card's stories are
+    on the other card, the two become one card under both names."""
+    out: list[tuple[str, list[dict[str, Any]]]] = []
+    for name, arts in groups:
+        keys = {story_key(a) for a in arts}
+        for i, (other, oarts) in enumerate(out):
+            okeys = {story_key(a) for a in oarts}
+            if len(keys & okeys) * 2 >= min(len(keys), len(okeys)):
+                merged = oarts + [a for a in arts if story_key(a) not in okeys]
+                out[i] = (f"{other} · {name}", merged)
+                break
+        else:
+            out.append((name, arts))
+    return out
+
+
+def _subject(label: str, groups: list[tuple[str, list[dict[str, Any]]]], total: int) -> str:
+    """Lead with who needs attention, not with a count: the reader decides from the
+    subject line whether to open it."""
+    if not groups:
+        return f"{label} — nothing new to report"
+    rank = {"UGLY": 0, "BAD": 1}
+    top = sorted(groups, key=lambda g: (min((rank.get(a.get("severity", ""), 9)
+                                             for a in g[1]), default=9), -len(g[1])))
+    names = [n for n, _ in top[:2]]
+    more = len(groups) - len(names)
+    return (f"{label} — {', '.join(names)}"
+            + (f" and {more} more firm{'s' if more != 1 else ''}" if more else "")
+            + f" ({total} item{'s' if total != 1 else ''})")
+
+
 async def run_schedule(schedule: dict[str, Any], *, search: Callable, send: Callable,
                        digest: Callable,
-                       firm_terms: Callable | None = None) -> tuple[bool, str, int, int]:
+                       firm_terms: Callable | None = None,
+                       already_sent: set[str] | None = None,
+                       on_sent: Callable[[list[str]], None] | None = None,
+                       ) -> tuple[bool, str, int, int]:
     """Search every term on the schedule, then email one digest. Firms with nothing to
     report are LEFT OUT rather than listed as empty — a digest of silence is noise.
 
     An all-firms schedule covers the register AS OF SEND TIME: ``firm_terms`` (an async
-    callable answering the current firm names) is merged with the terms stored on the
-    schedule — the stored snapshot keeps the desk's typed watch terms and stands alone
-    as the fallback when the register cannot be reached, so a register outage costs
-    freshness, never the digest itself."""
+    callable answering the current firms, each a name or ``{name, aliases, people,
+    watch}``) is merged with the terms stored on the schedule — the stored snapshot
+    keeps the desk's typed watch terms and stands alone as the fallback when the
+    register cannot be reached, so a register outage costs freshness, never the digest
+    itself. A record marked not watched is left out even if the snapshot names it. A
+    firm's key people (directors, promoters) are searched with it and reported on its
+    card.
+
+    ONLY NEW (the default): a story this schedule already sent is not sent again —
+    ``already_sent`` is what went out before, ``on_sent`` is told what went out now,
+    once the send succeeded. The same Satyendar Jain arrest used to arrive every week."""
     dto = datetime.now(desk_tz()).strftime("%Y-%m-%d")
     window = int(schedule.get("window_days", 7))
     dfrom = (datetime.now(desk_tz()) - timedelta(days=window)).strftime("%Y-%m-%d")
-    terms = [t.strip() for t in re.split(r"[,\n]", schedule.get("q", "")) if t.strip()]
+    watches = [Watch(t.strip()) for t in re.split(r"[,\n]", schedule.get("q", ""))
+               if t.strip()]
     if schedule.get("scope") == "all-firms" and firm_terms is not None:
         try:
-            fresh = [trading_name(t) for t in await firm_terms()]
-            seen = {t.casefold() for t in terms}
-            added = [t for t in fresh if t and t.casefold() not in seen]
-            terms = terms + added
+            fresh = [_watch_item(t) for t in await firm_terms()]
+            by_name = {w.name.casefold(): w for w in fresh if w.name}
+            off = {k for k, w in by_name.items() if not w.watched}
+            # A stored term that is now a register firm takes the firm's details.
+            watches = [by_name.get(w.name.casefold(), w) for w in watches]
+            seen = {w.name.casefold() for w in watches}
+            added = [w for k, w in by_name.items() if k not in seen]
+            watches = [w for w in watches + added if w.name.casefold() not in off]
             log.info("pulse_schedule_firms_refreshed",
-                     extra={"id": schedule.get("id"), "stored": len(seen),
-                            "added": len(added)})
+                     extra={"id": schedule.get("id"), "added": len(added),
+                            "not_watched": len(off),
+                            "with_people": sum(1 for w in watches if w.people),
+                            "with_aliases": sum(1 for w in watches if w.aliases)})
         except Exception as exc:  # noqa: BLE001 — freshness lost, digest kept
             log.warning("pulse_schedule_firms_refresh_failed",
                         extra={"id": schedule.get("id"), "error": str(exc)})
     adverse_only = bool(schedule.get("adverse_only"))
+    only_new = schedule.get("only_new", True) is not False
+    before = already_sent if only_new and already_sent else set()
 
     log.info("pulse_schedule_running", extra={"id": schedule.get("id"),
-                                              "terms": len(terms), "from": dfrom, "to": dto,
-                                              "adverse_only": adverse_only})
+                                              "terms": len(watches), "from": dfrom,
+                                              "to": dto, "adverse_only": adverse_only,
+                                              "only_new": only_new})
     t0 = time.time()
+    gate = asyncio.Semaphore(DIGEST_CONCURRENCY)
+    found = await asyncio.gather(*(_search_firm(w, search, dfrom, dto, gate)
+                                   for w in watches))
     groups: list[tuple[str, list[dict[str, Any]]]] = []
-    for term in terms:
-        arts = await search(term, dfrom, dto)
+    repeats = 0
+    # Which sources were not searched, for how many firms, and why (first reason seen).
+    down_count: dict[str, int] = {}
+    down_why: dict[str, str] = {}
+    for _, down in found:
+        for src, why in down.items():
+            down_count[src] = down_count.get(src, 0) + 1
+            down_why.setdefault(src, why)
+    coverage = {"firms": len(watches), "down": down_count, "why": down_why}
+    for w, (arts, _) in zip(watches, found, strict=True):
         if adverse_only:
             arts = [a for a in arts if a.get("severity") in ("UGLY", "BAD")]
-        if arts:
-            groups.append((term, arts))
+        fresh_arts = [a for a in arts if story_key(a) not in before]
+        repeats += len(arts) - len(fresh_arts)
+        if fresh_arts:
+            groups.append((w.name, fresh_arts))
+    groups = merge_shared(groups)
     total = sum(len(a) for _, a in groups)
 
-    head = ('<div style="font-family:Segoe UI,Arial,sans-serif;max-width:720px;margin:8px auto;'
-            f'color:#5F6E76;font-size:13px">{len(groups)} firm(s) with '
-            f'{"adverse" if adverse_only else "matching"} news &middot; {dfrom} to {dto}</div>')
-    body = head + "".join(digest(term, arts, dfrom, dto) + "<br>" for term, arts in groups)
-    label = "PRISM " + ("risk (adverse)" if adverse_only else "news") + " digest"
-    subject = schedule.get("subject") or (
-        f"{label} — {len(groups)} firms, {total} items" if groups
-        else f"{label} — nothing to report")
+    # One page for the whole run: the masthead once, then a card per firm — and the
+    # coverage, even when nothing was found: "nothing new" with Google down for most
+    # firms is not the same email as "nothing new".
+    body = digest(groups, dfrom, dto, adverse_only=adverse_only, coverage=coverage)
+    label = "PRISM " + ("adverse news" if adverse_only else "news") + " digest"
+    subject = schedule.get("subject") or _subject(label, groups, total)
 
     ok, msg = await asyncio.to_thread(
         send, schedule.get("recipients", []), subject,
-        body or "<p>No matching news in this window.</p>")
+        body or "<p>No new matching news in this window.</p>")
+    if ok and on_sent is not None and groups:
+        on_sent([story_key(a) for _, arts in groups for a in arts])
     log.info("pulse_schedule_done", extra={"id": schedule.get("id"),
                                            "seconds": round(time.time() - t0, 1),
                                            "firms": len(groups), "items": total,
-                                           "result": msg})
+                                           "repeats_skipped": repeats,
+                                           "sources_down": down_count, "result": msg})
+    if down_count:
+        msg += " — not searched: " + ", ".join(
+            f"{src} for {n} of {len(watches)} firms" for src, n in down_count.items())
     return ok, msg, len(groups), total
 
 

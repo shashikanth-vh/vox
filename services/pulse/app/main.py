@@ -43,7 +43,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.config import Settings, get_settings
 from app.matching import WatchEntity, classify_signal, match_entities
 from app.news import schedules as sched
-from app.news.mailer import digest_html, send_email
+from app.news.mailer import digest_html, digest_page, send_email
 from app.news.search import NewsSearch
 from app.news.triage import POLICY_THEMES
 from app.providers import NewsItem, build_providers
@@ -69,6 +69,9 @@ class SweepIn(BaseModel):
     # the relationship and only the CALLER holds the book, so it says which is which —
     # "raises fresh debt" is a win for a prospect and a review flag for a borrower.
     live_terms: list[str] = Field(default_factory=list, max_length=1200)
+    # A sweep's terms are firm NAMES: searched in quotes, and an article is kept only
+    # if it prints the name. Off only for a sweep of topics rather than firms.
+    strict: bool = True
 
 
 class ItemIn(BaseModel):
@@ -325,15 +328,20 @@ def create_app() -> FastAPI:
         """An all-firms digest covers the register AS OF SEND TIME, not as of the day
         the schedule was created: answer the tenant's current firm names. run_schedule
         merges these with the stored snapshot (which keeps the desk's typed watch
-        terms) and falls back to the snapshot alone if this raises."""
-        async def _fetch() -> list[str]:
+        terms) and falls back to the snapshot alone if this raises. Each firm comes
+        with the key people the analyst listed on it, searched with the firm."""
+        async def _fetch() -> list[dict[str, Any]]:
             client = _tenant_client(app, str(schedule.get("tenant") or ""))
-            names: list[str] = []
+            firms: list[dict[str, Any]] = []
             async for row in client.iterate("entities", page_size=200):
-                names.append(row.get("display_name") or row.get("legal_name") or "")
-                if len(names) >= settings.watchlist_max_entities:
+                name = row.get("display_name") or row.get("legal_name") or ""
+                if name.strip():
+                    firms.append({"name": name, "people": row.get("key_people") or [],
+                                  "aliases": row.get("news_aliases") or [],
+                                  "watch": row.get("news_watch") is not False})
+                if len(firms) >= settings.watchlist_max_entities:
                     break
-            return [n for n in names if n.strip()]
+            return firms
         return _fetch
 
     async def _run_one_schedule(schedule: dict) -> tuple[bool, str, int, int]:
@@ -341,10 +349,13 @@ def create_app() -> FastAPI:
         this app's engine and settings rather than reaching for a global."""
         return await sched.run_schedule(
             schedule,
-            search=lambda term, dfrom, dto: app.state.search.search(term, dfrom, dto),
+            search=lambda term, dfrom, dto, **kw: app.state.search.search_detail(
+                term, dfrom, dto, **kw),
             send=lambda to, subject, body: send_email(settings.smtp(), to, subject, body),
-            digest=digest_html,
-            firm_terms=_firm_terms_for(schedule))
+            digest=digest_page,
+            firm_terms=_firm_terms_for(schedule),
+            already_sent=app.state.schedules.sent_keys(schedule["id"]),
+            on_sent=lambda keys: app.state.schedules.remember_sent(schedule["id"], keys))
 
     @app.get("/v1/news/search", tags=["News Radar"],
              summary="Search the news for a term (Google News + GDELT + Bing, merged)")
@@ -411,7 +422,8 @@ def create_app() -> FastAPI:
         try:
             rows = await request.app.state.search.sweep(
                 payload.terms, dfrom=payload.date_from, dto=payload.date_to,
-                limit=payload.limit, live_terms=set(payload.live_terms))
+                limit=payload.limit, live_terms=set(payload.live_terms),
+                strict=payload.strict)
         except Exception as exc:  # noqa: BLE001 - a sweep must fail as a message
             log.exception("pulse_sweep_failed", extra={"terms": len(payload.terms)})
             return ORJSONResponse(status_code=502, content={
@@ -519,19 +531,19 @@ def create_app() -> FastAPI:
             return denied
         recipients = _recipients(payload.get("recipients"))
         adverse_only = bool(payload.get("adverse_only"))
-        parts, total = [], 0
+        parts: list[tuple[str, list[dict[str, Any]]]] = []
+        total = 0
         for group in payload.get("groups") or []:
             arts = group.get("articles") or []
             if adverse_only:
                 arts = [a for a in arts if a.get("severity") in ("UGLY", "BAD")]
             if arts:                      # a firm with nothing to report is left out
-                parts.append(digest_html(group.get("term", ""), arts))
+                parts.append((group.get("term", ""), arts))
                 total += len(arts)
-        head = ('<div style="font-family:Segoe UI,Arial,sans-serif;max-width:720px;'
-                f'margin:8px auto;color:#5F6E76;font-size:13px">{len(parts)} firm(s) '
-                f'&middot; {total} articles</div>')
         subject = payload.get("subject") or f"PRISM news digest — {len(parts)} firms"
-        body = head + "<br>".join(parts) if parts else "<p>No news to send.</p>"
+        body = (digest_page(parts, str(payload.get("from") or ""),
+                            str(payload.get("to") or ""), adverse_only=adverse_only)
+                if parts else "<p>No news to send.</p>")
         ok, msg = await asyncio.to_thread(send_email, settings.smtp(), recipients,
                                           subject, body)
         return ORJSONResponse(status_code=200 if ok else 400,
@@ -593,6 +605,8 @@ def create_app() -> FastAPI:
             "window_days": max(1, min(90, int(payload.get("window_days", 7) or 7))),
             "subject": (payload.get("subject") or "").strip(),
             "adverse_only": bool(payload.get("adverse_only")),
+            # Off only when the desk asks for every matching story, repeats included.
+            "only_new": payload.get("only_new", True) is not False,
             "scope": (payload.get("scope") or "").strip(), "active": True, "last_run": 0,
             "next_run": sched.next_run(cadence, hour, weekday)}
         try:
@@ -634,6 +648,7 @@ def create_app() -> FastAPI:
             "window_days": max(1, min(90, int(payload.get("window_days", 7) or 7))),
             "subject": (payload.get("subject") or "").strip(),
             "adverse_only": bool(payload.get("adverse_only")),
+            "only_new": payload.get("only_new", current.get("only_new", True)) is not False,
             "scope": (payload.get("scope") or "").strip(),
         }
         # The slot moves with the edit; identity and run history stay put.
@@ -680,10 +695,14 @@ def create_app() -> FastAPI:
                                   content={"ok": False, "message": "No such schedule."})
         ok, msg, firms, items = await sched.run_schedule(
             schedule,
-            search=lambda term, dfrom, dto: request.app.state.search.search(term, dfrom, dto),
+            search=lambda term, dfrom, dto, **kw: request.app.state.search.search_detail(
+                term, dfrom, dto, **kw),
             send=lambda to, subject, body: send_email(settings.smtp(), to, subject, body),
-            digest=digest_html,
-            firm_terms=_firm_terms_for(schedule))
+            digest=digest_page,
+            firm_terms=_firm_terms_for(schedule),
+            already_sent=request.app.state.schedules.sent_keys(schedule["id"]),
+            on_sent=lambda keys: request.app.state.schedules.remember_sent(
+                schedule["id"], keys))
         request.app.state.schedules.record_run(schedule["id"], ok=ok,
                                                note=f"run now: {msg}",
                                                firms=firms, items=items)

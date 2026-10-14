@@ -7,7 +7,7 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import DownloadIcon from '@mui/icons-material/Download';
 import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined';
 import { tokens } from '../../theme';
-import { panoramaService, type RiskBand, type RiskGrade }
+import { panoramaService, type RiskBand, type RiskCoverage, type RiskFlag, type RiskGrade }
   from '../../services/panoramaService';
 
 /**
@@ -15,9 +15,10 @@ import { panoramaService, type RiskBand, type RiskGrade }
  *
  * The chip carries the band's colour and the score; PROVISIONAL (financials or
  * banking missing) keeps the colour but draws dashed, so a thin-data grade never
- * looks as settled as a full one. The (i) opens how the AI got there: pillar by
- * pillar with evidence, the hard triggers, the rubric's own overrides, and what
- * the grade was built from.
+ * looks as settled as a full one. The (i) opens the report in a credit reader's
+ * order: how much of the file the grade stands on, the red flags PRISM read from the
+ * files itself, the key figures, the hard triggers (Unverified when their evidence was
+ * not read), what to do — and the rubric's pillar working last, folded away.
  */
 
 export const BAND_COLOR: Record<RiskBand, string> = {
@@ -114,6 +115,117 @@ function Bullets({ items, color }: { items: string[]; color?: string }) {
 }
 
 const TRIGGER_COLOR = { Hit: tokens.bad, Clear: tokens.ok, Unknown: tokens.muted };
+/** "Unknown" means the evidence was not read — say that, never imply a clear. */
+const TRIGGER_WORD = { Hit: 'HIT', Clear: 'CLEAR', Unknown: 'UNVERIFIED' };
+const FLAG_COLOR = { red: tokens.bad, amber: tokens.warn, info: '#1F6FA8' };
+const COVER: Record<RiskCoverage['status'], { color: string; word: string }> = {
+  'read': { color: tokens.ok, word: 'read' },
+  'partly read': { color: tokens.warn, word: 'partly read' },
+  'not read': { color: tokens.bad, word: 'not read' },
+  'no file': { color: tokens.muted, word: 'no file' },
+  'none found': { color: tokens.muted, word: 'none found' },
+};
+// Key figures, in the order a credit reader scans them.
+const FIGURES: [string, string, (v: number) => string][] = [
+  ['revenue', 'Revenue (₹ L)', (v) => v.toLocaleString('en-IN', { maximumFractionDigits: 0 })],
+  ['growth', 'Growth', (v) => `${v > 0 ? '+' : ''}${v.toFixed(1)}%`],
+  ['ebitda', 'EBITDA (₹ L)', (v) => v.toLocaleString('en-IN', { maximumFractionDigits: 0 })],
+  ['ebitda_pct', 'EBITDA margin', (v) => `${(v * 100).toFixed(1)}%`],
+  ['pat', 'PAT (₹ L)', (v) => v.toLocaleString('en-IN', { maximumFractionDigits: 0 })],
+  ['tnw', 'Net worth (₹ L)', (v) => v.toLocaleString('en-IN', { maximumFractionDigits: 0 })],
+  ['current_ratio', 'Current ratio', (v) => `${v.toFixed(2)}×`],
+  ['tol_tnw', 'TOL / TNW', (v) => `${v.toFixed(2)}×`],
+  ['td_ebitda', 'Debt / EBITDA', (v) => `${v.toFixed(2)}×`],
+  ['dscr', 'DSCR', (v) => `${v.toFixed(2)}×`],
+];
+
+function Coverage({ rows }: { rows: RiskCoverage[] }) {
+  return (
+    <Box sx={{ display: 'grid', gap: 0.5,
+      gridTemplateColumns: { xs: 'minmax(0,1fr)', sm: 'minmax(0,1fr) minmax(0,1fr)' } }}>
+      {rows.map((r) => {
+        const c = COVER[r.status] || COVER['no file'];
+        const tip = [
+          r.read.length ? `Read: ${r.read.join('; ')}` : '',
+          ...r.unread.map((u) => `Not read: ${u.name}${u.reason ? ` — ${u.reason}` : ''}`),
+          r.note || '',
+        ].filter(Boolean).join('\n');
+        return (
+          <Tooltip key={r.area} title={<span style={{ whiteSpace: 'pre-line' }}>{tip || 'No file in the Data Register'}</span>}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.7, minWidth: 0,
+              border: `1px solid ${tokens.line}`, borderLeft: `3px solid ${c.color}`,
+              borderRadius: '6px', px: 0.8, py: 0.4 }}>
+              <Typography sx={{ fontSize: 11.4, fontWeight: 700, flex: 1, minWidth: 0 }} noWrap>
+                {r.area}</Typography>
+              {r.checked_by_prism && (
+                <Chip size="small" label="checked" variant="outlined"
+                  sx={{ height: 16, fontSize: 9, color: tokens.tealHi, borderColor: tokens.tealHi }} />)}
+              <Typography sx={{ fontSize: 10.5, fontWeight: 800, color: c.color }}>
+                {c.word.toUpperCase()}</Typography>
+            </Box>
+          </Tooltip>);
+      })}
+    </Box>
+  );
+}
+
+function Flags({ flags }: { flags: RiskFlag[] }) {
+  if (!flags.length) {
+    return <Typography sx={{ fontSize: 11.6, color: tokens.muted }}>
+      No red or amber flags in the files PRISM could check — see what was not read above.</Typography>;
+  }
+  return (
+    <Box sx={{ display: 'grid', gap: 0.6 }}>
+      {flags.map((f, i) => (
+        <Box key={i} sx={{ display: 'flex', gap: 0.8, alignItems: 'flex-start' }}>
+          <Box sx={{ width: 9, height: 9, borderRadius: '50%', mt: '5px', flexShrink: 0,
+            bgcolor: FLAG_COLOR[f.severity] }} />
+          <Box sx={{ minWidth: 0 }}>
+            <Typography sx={{ fontSize: 11.8, fontWeight: 700, color: '#17252B' }}>
+              {f.title}
+              {f.trigger && <Chip size="small" label="hard trigger" sx={{ height: 16, fontSize: 9,
+                ml: 0.6, color: '#fff', bgcolor: tokens.bad }} />}</Typography>
+            <Typography sx={{ fontSize: 11.2, color: '#44535B', lineHeight: 1.4,
+              overflowWrap: 'anywhere' }}>{f.detail}
+              <span style={{ color: tokens.muted }}> · {f.area} · {f.source}</span></Typography>
+          </Box>
+        </Box>))}
+    </Box>
+  );
+}
+
+function Figures({ kf }: { kf: NonNullable<NonNullable<RiskGrade['evidence']>['key_figures']> }) {
+  const rows = FIGURES.filter(([k]) => kf.rows[k]);
+  return (
+    <Box sx={{ overflowX: 'auto' }}>
+      <Box component="table" sx={{ borderCollapse: 'collapse', fontSize: 11.2, width: '100%',
+        '& td, & th': { px: 0.8, py: 0.3, borderBottom: `1px solid ${tokens.line}`,
+          textAlign: 'right', whiteSpace: 'nowrap' },
+        '& th:first-of-type, & td:first-of-type': { textAlign: 'left' } }}>
+        <thead><tr><th style={{ color: tokens.muted, fontWeight: 600 }}>{kf.source}</th>
+          {kf.years.map((y) => <th key={y} style={{ fontWeight: 700 }}>{y}</th>)}</tr></thead>
+        <tbody>{rows.map(([k, label, fmt]) => (
+          <tr key={k}><td style={{ fontWeight: 600 }}>{label}</td>
+            {kf.years.map((y) => {
+              const v = kf.rows[k][y];
+              return <td key={y}>{v == null ? '—' : fmt(v)}</td>;
+            })}</tr>))}</tbody>
+      </Box>
+    </Box>
+  );
+}
+
+function More({ title, children }: { title: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Box sx={{ mt: 1 }}>
+      <Button size="small" onClick={() => setOpen(!open)}
+        sx={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '.07em', color: '#44535B',
+          px: 0, minWidth: 0 }}>{open ? '▾' : '▸'} {title}</Button>
+      {open && <Box sx={{ mt: 0.4 }}>{children}</Box>}
+    </Box>
+  );
+}
 
 function ReportButton({ grade }: { grade: RiskGrade }) {
   const [busy, setBusy] = useState(false);
@@ -137,6 +249,14 @@ export function RiskGradeDetails({ grade, onRegrade }: {
 }) {
   const c = BAND_COLOR[grade.rating];
   const inp = grade.inputs;
+  const ev = grade.evidence;
+  const reds = ev?.flags.filter((f) => f.severity === 'red').length ?? 0;
+  const ambers = ev?.flags.filter((f) => f.severity === 'amber').length ?? 0;
+  const hits = grade.hard_triggers.filter((t) => t.status === 'Hit').length;
+  const unverified = grade.hard_triggers.filter((t) => t.status === 'Unknown').length;
+  // Every file on record that the grade could not read is a document to ask for again.
+  const unreadAsks = (ev?.coverage ?? []).flatMap((r) => r.unread.map((u) =>
+    `${u.name} — on file but not read${u.reason ? ` (${u.reason})` : ''}; send it in a readable form`));
   return (
     <Box>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
@@ -175,8 +295,52 @@ export function RiskGradeDetails({ grade, onRegrade }: {
         <Typography sx={{ fontSize: 10.8, color: tokens.muted, mt: 0.4 }}>
           {grade.runs.length} independent readings ({grade.runs.map((r) => r.score).join(' · ')});
           each pillar takes the median of its scores.</Typography>)}
+      {ev && (
+        <Typography sx={{ fontSize: 11.6, mt: 0.8, fontWeight: 700 }}>
+          <span style={{ color: tokens.bad }}>{reds} red flag{reds === 1 ? '' : 's'}</span>
+          {' · '}<span style={{ color: tokens.warn }}>{ambers} amber</span>
+          {' · '}<span style={{ color: hits ? tokens.bad : '#17252B' }}>{hits} hard trigger{hits === 1 ? '' : 's'} hit</span>
+          {' · '}<span style={{ color: tokens.muted }}>{unverified} unverified</span></Typography>)}
 
-      <Label>HOW THE SCORE WAS BUILT — seven weighted pillars (score × weight)</Label>
+      {ev && ev.coverage.length > 0 && (<>
+        <Label>WHAT THE GRADE STANDS ON — evidence read, by area (hover for files)</Label>
+        <Coverage rows={ev.coverage} /></>)}
+
+      {ev && (<>
+        <Label>RED FLAGS — read by PRISM from the files</Label>
+        <Flags flags={ev.flags} /></>)}
+
+      {ev?.key_figures && (<>
+        <Label>KEY FIGURES</Label>
+        <Figures kf={ev.key_figures} /></>)}
+
+      <Label>HARD RED TRIGGERS</Label>
+      {grade.hard_triggers.length ? grade.hard_triggers.map((t, i) => (
+        <Box key={i} sx={{ display: 'flex', gap: 0.8, alignItems: 'baseline', mb: 0.3 }}>
+          <Typography sx={{ fontSize: 10.5, fontWeight: 800, minWidth: 74,
+            color: TRIGGER_COLOR[t.status] }}>{TRIGGER_WORD[t.status] || t.status}</Typography>
+          <Typography sx={{ fontSize: 11.4 }}>{t.trigger}
+            {t.evidence && <span style={{ color: tokens.muted }}> — {t.evidence}</span>}
+          </Typography>
+        </Box>)) : <Typography sx={{ fontSize: 11.6, color: tokens.muted }}>
+          Not reported.</Typography>}
+
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'minmax(0,1fr)', sm: 'minmax(0,1fr) minmax(0,1fr)' }, columnGap: 2 }}>
+        <Box><Label>TOP RISKS</Label><Bullets items={grade.risks} /></Box>
+        <Box><Label>TOP MITIGANTS</Label><Bullets items={grade.mitigants} /></Box>
+      </Box>
+
+      {grade.conditions.length > 0 && (<>
+        <Label>CONDITIONS PRECEDENT (IF PROCEEDING)</Label><Bullets items={grade.conditions} /></>)}
+
+      <Label>DOCUMENTS TO REQUEST</Label>
+      <Bullets items={[...grade.data_gaps, ...unreadAsks]} />
+
+      <Label>WHAT WOULD MOVE IT</Label>
+      <Typography sx={{ fontSize: 11.6 }}>▲ {grade.move_up || '—'}</Typography>
+      <Typography sx={{ fontSize: 11.6 }}>▼ {grade.move_down || '—'}</Typography>
+
+      <More title="HOW THE SCORE WAS BUILT — seven weighted pillars">
       {/* Four columns on a desk; on a phone the evidence drops under its pillar
           on a full-width row instead of being squeezed off the right edge. */}
       <Box sx={{ display: 'grid', columnGap: 1, rowGap: 0.6, alignItems: 'start', fontSize: 11.4,
@@ -194,8 +358,8 @@ export function RiskGradeDetails({ grade, onRegrade }: {
                 sx={{ height: 16, fontSize: 9, ml: 0.5, color: tokens.warn,
                   borderColor: tokens.warn }} />}
             </Typography>
-            <Typography sx={{ fontSize: 11.6 }}>{pl.score}/10</Typography>
-            <Typography sx={{ fontSize: 11.6, fontWeight: 700 }}>{pl.weighted}</Typography>
+            <Typography sx={{ fontSize: 11.6 }}>{pl.available ? `${pl.score}/10` : '—'}</Typography>
+            <Typography sx={{ fontSize: 11.6, fontWeight: 700 }}>{pl.available ? pl.weighted : '—'}</Typography>
             <Typography sx={{ fontSize: 11, color: '#44535B', lineHeight: 1.4, minWidth: 0,
               overflowWrap: 'anywhere', gridColumn: { xs: '1 / -1', sm: 'auto' },
               pb: { xs: 0.6, sm: 0 }, borderBottom: { xs: `1px solid ${tokens.line}`, sm: 'none' } }}>
@@ -206,37 +370,13 @@ export function RiskGradeDetails({ grade, onRegrade }: {
         Bands: GREEN ≥ 70 · AMBER 45–69 · RED &lt; 45, scored over the pillars that
         have data. Any hard trigger → RED. No financials or banking → never GREEN
         (PROVISIONAL).</Typography>
+      </More>
 
-      <Label>HARD RED TRIGGERS</Label>
-      {grade.hard_triggers.length ? grade.hard_triggers.map((t, i) => (
-        <Box key={i} sx={{ display: 'flex', gap: 0.8, alignItems: 'baseline', mb: 0.3 }}>
-          <Typography sx={{ fontSize: 10.5, fontWeight: 800, minWidth: 56,
-            color: TRIGGER_COLOR[t.status] }}>{t.status.toUpperCase()}</Typography>
-          <Typography sx={{ fontSize: 11.4 }}>{t.trigger}
-            {t.evidence && <span style={{ color: tokens.muted }}> — {t.evidence}</span>}
-          </Typography>
-        </Box>)) : <Typography sx={{ fontSize: 11.6, color: tokens.muted }}>
-          Not reported.</Typography>}
+      {grade.adjustments.length > 0 && (
+        <More title={`WHERE THE RULES CORRECTED THE MODEL (${grade.adjustments.length})`}>
+          <Bullets items={grade.adjustments} color={tokens.warn} /></More>)}
 
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'minmax(0,1fr)', sm: 'minmax(0,1fr) minmax(0,1fr)' }, columnGap: 2 }}>
-        <Box><Label>TOP RISKS</Label><Bullets items={grade.risks} /></Box>
-        <Box><Label>TOP MITIGANTS</Label><Bullets items={grade.mitigants} /></Box>
-      </Box>
-
-      <Label>DATA GAPS — documents to request</Label>
-      <Bullets items={grade.data_gaps} />
-
-      <Label>WHAT WOULD MOVE IT</Label>
-      <Typography sx={{ fontSize: 11.6 }}>▲ {grade.move_up || '—'}</Typography>
-      <Typography sx={{ fontSize: 11.6 }}>▼ {grade.move_down || '—'}</Typography>
-      {grade.conditions.length > 0 && (<>
-        <Label>CONDITIONS (IF PROCEEDING)</Label><Bullets items={grade.conditions} /></>)}
-
-      {grade.adjustments.length > 0 && (<>
-        <Label>RUBRIC OVERRIDES — where the rules corrected the model</Label>
-        <Bullets items={grade.adjustments} color={tokens.warn} /></>)}
-
-      <Label>BUILT FROM</Label>
+      <More title={`FILES (${inp.documents?.length ?? 0}) AND OTHER INPUTS`}>
       <Typography sx={{ fontSize: 11, color: '#44535B', lineHeight: 1.5 }}>
         Register: {inp.lending_lines} lending line(s), {inp.platform_deals} platform
         deal(s), {inp.asset_monetisation} asset monetisation, {inp.interactions} interaction(s),
@@ -250,7 +390,7 @@ export function RiskGradeDetails({ grade, onRegrade }: {
         <Box sx={{ mt: 0.6, display: 'grid', gap: 0.3 }}>
           {inp.documents.map((d, i) => (
             <Typography key={i} sx={{ fontSize: 11, color: d.used ? '#17252B' : tokens.muted }}>
-              <b style={{ color: d.used ? tokens.ok : tokens.warn }}>{d.used ? 'READ' : 'SKIPPED'}</b>
+              <b style={{ color: d.used ? tokens.ok : tokens.warn }}>{d.used ? 'READ' : 'NOT READ'}</b>
               {' '}{d.name}
               <span style={{ color: tokens.muted }}>
                 {' · '}{d.section || '—'}
@@ -263,6 +403,7 @@ export function RiskGradeDetails({ grade, onRegrade }: {
         <Typography sx={{ fontSize: 11, color: tokens.muted, mt: 0.4 }}>
           Documents: none — {inp.document_note || 'no files in the graded sections'}.</Typography>
       )}
+      </More>
       <Typography sx={{ fontSize: 10.5, color: tokens.muted, mt: 0.8 }}>
         {grade.engine} · rubric {grade.prompt} ({grade.prompt_version}) · graded
         {' '}{stamp(grade.generated_at)} by {grade.generated_by}

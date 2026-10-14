@@ -126,16 +126,16 @@ async def test_the_grade_reads_the_data_register_the_cam_way(monkeypatch):
     g = r.json()
     assert g["label"] == "AMBER – PROVISIONAL" and g["cached"] is False
     assert g["generated_by"] == "bhavana@evamfinance.com" and g["entity_id"] == "e-1"
-    # Financials + Banking & Debt only; the Pending slot and the KYC file are not read.
-    # The PDF and the real .xls go through DocRAG; the CSV-labelled-Excel is read as text.
-    assert ai.extracts == ["d1.pdf", "d2.xls"]
+    # Financials, Banking & Debt, Compliance & Bureau and KYC: the Pending slot is not
+    # read. PDFs and the real .xls go through DocRAG; the CSV-labelled-Excel is text.
+    assert ai.extracts == ["d1.pdf", "d4.pdf", "d2.xls"]
     url, kw = ai.grades[0]
     assert url == "https://ai-host:8443/v1/risk-grade" and kw["headers"]["X-API-Key"] == "gw-key"
     sent = kw["json"]
     # Hard actuals first, the CMA projection last (it is what a tight budget cuts).
     assert [d["name"] for d in sent["documents"]] == [
         "Macwin Audited Fins FY 2024-25 signed.pdf", "Debtors Aging 30.6.25.csv",
-        "Macwin_CMA Axis - Company.xls"]
+        "PAN.pdf", "Macwin_CMA Axis - Company.xls"]
     assert sent["documents"][1]["text"].startswith("Debtor,Days")
     # PULSE, server-side: the firm and its key person; the dialog's news is not needed.
     assert [n["headline"] for n in sent["news"]] == [
@@ -143,7 +143,7 @@ async def test_the_grade_reads_the_data_register_the_cam_way(monkeypatch):
     assert sent["news"][0]["severity"] == "GREEN" and sent["news"][1]["about"] == "R. Kumar"
     assert len(sent["panorama"]["interactions"]) == 30
     fates = {d["name"]: d for d in g["inputs"]["documents"]}
-    assert all(f["used"] for f in fates.values()) and len(fates) == 3
+    assert all(f["used"] for f in fates.values()) and len(fates) == 4
     assert fates["Macwin_CMA Axis - Company.xls"]["section"] == "Financials"
     assert sent["documents"][0]["section"] == "Financials"
 
@@ -186,8 +186,10 @@ def test_the_report_explains_the_confidence_and_the_evidence():
         "documents": [{"name": "x.pdf", "section": "Financials", "engines": ["sarvam_docai"],
                        "used": True}]}})
     assert "64% = 60% × data coverage (70%" in md and "spread 9 points" in md
-    assert "| A. Financial strength | 30% | 6/10 | 18 | Revenue ₹61 Cr / FY25 |" in md
+    assert "| A. Financial strength | 30% | 6 | 18 | Revenue ₹61 Cr / FY25 |" in md
     assert "| x.pdf | Financials | sarvam_docai | yes |" in md
+    # The rubric's working is the appendix, after what a reader acts on.
+    assert md.index("Hard red triggers") < md.index("Appendix A — How the score was built")
 
 
 def test_a_file_in_two_slots_is_read_once_and_actuals_come_first():
@@ -363,7 +365,7 @@ async def test_a_docrag_blip_is_retried_once(monkeypatch):
     app = _grading_app(monkeypatch, ai)
     g = (await _call(app, "POST", "/v1/panorama/risk-grade", json=BODY)).json()
     assert all(d["used"] for d in g["inputs"]["documents"])
-    assert len(ai.grades[0][1]["json"]["documents"]) == 3
+    assert len(ai.grades[0][1]["json"]["documents"]) == 4
 
 
 async def test_a_short_handed_grade_is_never_replayed_as_unchanged(monkeypatch):
@@ -419,10 +421,11 @@ async def test_no_file_is_left_out_when_the_files_are_large(monkeypatch):
     app = _grading_app(monkeypatch, ai)
     g = (await _call(app, "POST", "/v1/panorama/risk-grade", json=BODY)).json()
     fates = g["inputs"]["documents"]
-    assert len(fates) == 3 and all(f["used"] for f in fates)
+    assert len(fates) == 4 and all(f["used"] for f in fates)
     sent = ai.grades[0][1]["json"]["documents"]
-    assert len(sent) == 3 and sum(len(d["text"]) for d in sent) <= 5000
-    assert all(d["text"].rstrip().endswith(("TAIL d1.pdf", "TAIL d2.xls", "NTPC,45"))
+    assert len(sent) == 4 and sum(len(d["text"]) for d in sent) <= 5000
+    assert all(d["text"].rstrip().endswith(("TAIL d1.pdf", "TAIL d2.xls", "TAIL d4.pdf",
+                                            "NTPC,45"))
                for d in sent)
     assert any("clipped" in (f.get("note") or "") for f in fates)
 
@@ -435,3 +438,99 @@ def test_newest_audit_report_is_read_first():
     assert [r["original_filename"][:24] for r in sorted(rows, key=rg.read_order)] == [
         "Audit Report F.Y. 2024'2", "Audit Report F.Y. 2023'2", "Audit Report F.Y. 2022'2",
         "USP_ITR F.Y.2024'25.pdf"]
+
+
+# ------------------------------------------------------------- zips, facts, coverage
+def _zip(members: dict[str, bytes]) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        for name, data in members.items():
+            z.writestr(name, data)
+    return buf.getvalue()
+
+
+BSA_TEXT = ("|  | CC/OD Limit | 25000000.0 |\n|  | - Analysed by Evam Finance |\n"
+            "## Sheet: Overview-Month Wise\n|  | No. of days limit over-drawn |  | 15.0 |\n"
+            "|  | Peak overdrawing amount |  | -26712345.50 |\n"
+            "## Sheet: Cheque Return\n"
+            "| 2025-05-20 00:00:00 | REJECT:408812:FUNDS INSUFFICIENT | Funds Insufficient "
+            "| 252000.0 | - |\n## Sheet: EOD\nPromoter PAN ABCPK1234D on file")
+
+
+class _ZipHost(_AiHost):
+    """DocRAG reading each file inside the zip: the first is a BOI bank-statement
+    analysis, the second a plain scan."""
+
+    async def post(self, url, **kw):  # noqa: ANN001, ANN003
+        if str(url).endswith("/v1/extract"):
+            name = kw["files"]["file"][0]
+            self.extracts.append(name)
+            md = BSA_TEXT if name == "z1-0.xlsx" else f"# text of {name}"
+            return httpx.Response(200, json={"markdown": md, "extraction_engines": ["x"]},
+                                  request=httpx.Request("POST", url))
+        return await super().post(url, **kw)
+
+
+def _zip_register() -> _Register:
+    reg = _Register(docs=[*DOCS, {"id": "z1", "section": "bank", "status": "On File",
+                                  "title": "Bank statements",
+                                  "original_filename": "Bank Statements.zip"},
+                          {"id": "z2", "section": "comp", "status": "On File",
+                           "title": "GST returns", "original_filename": "GSTR3B Reports.zip"}])
+    CONTENT["z1"] = ("application/x-zip-compressed", _zip({
+        "BOI - a_BSA_Report.xlsx": b"PK\x03\x04xl/ workbook", "BOB Apr-Jun.pdf": b"%PDF-1.4",
+        "readme.txt": b"hello"}))
+    CONTENT["z2"] = ("application/zip", _zip({"notes.docx": b"x"}))
+    return reg
+
+
+async def test_a_zip_is_opened_and_each_file_in_it_read_on_its_own(monkeypatch):
+    ai = _ZipHost()
+    app = _grading_app(monkeypatch, ai, _zip_register())
+    g = (await _call(app, "POST", "/v1/panorama/risk-grade", json=BODY)).json()
+    fates = {d["name"]: d for d in g["inputs"]["documents"]}
+    assert fates["Bank Statements.zip / BOI - a_BSA_Report.xlsx"]["used"]
+    assert fates["Bank Statements.zip / BOB Apr-Jun.pdf"]["used"]
+    assert "not readable" in fates["Bank Statements.zip / readme.txt"]["reason"]
+    assert "not readable" in fates["GSTR3B Reports.zip / notes.docx"]["reason"]
+    sent = ai.grades[0][1]["json"]
+    assert "Bank Statements.zip / BOB Apr-Jun.pdf" in [d["name"] for d in sent["documents"]]
+
+
+async def test_prism_reads_the_flags_itself_and_tells_the_grader_what_was_not_read(monkeypatch):
+    ai = _ZipHost()
+    app = _grading_app(monkeypatch, ai, _zip_register())
+    g = (await _call(app, "POST", "/v1/panorama/risk-grade", json=BODY)).json()
+    flags = {f["title"]: f for f in g["evidence"]["flags"]}
+    assert flags["BOI CC/OD overdrawn beyond its limit"]["severity"] == "red"
+    assert "₹2.52 L on 2025-05-20" in \
+        flags["1 payment(s) returned for insufficient funds (BOI)"]["detail"]
+    cov = {r["area"]: r for r in g["evidence"]["coverage"]}
+    assert cov["Banking"]["checked_by_prism"] is True
+    assert cov["GST & statutory"]["status"] == "not read"
+    sent = ai.grades[0][1]["json"]
+    assert sent["facts"]["flags"] and "GSTR3B Reports.zip" in sent["facts"]["unread_files"]
+    assert "Bank Statements.zip / BOB Apr-Jun.pdf" in sent["facts"]["read_files"]
+    # An ID number never leaves PRISM; the bank figures do.
+    bsa = next(d for d in sent["documents"] if "BSA" in d["name"])
+    assert "ABCPK1234D" not in bsa["text"] and "[PAN]" in bsa["text"]
+
+
+def test_the_report_leads_with_coverage_flags_and_figures():
+    g = {**GRADE, "generated_by": "a@b", "hard_triggers": [
+        {"trigger": "Statutory dues default", "status": "Unknown", "evidence": "not read"}],
+        "evidence": {
+            "flags": [{"severity": "red", "area": "Banking", "title": "BOI CC overdrawn",
+                       "detail": "15 day(s).", "source": "BOI BSA.xlsx"}],
+            "key_figures": {"source": "CMA.xlsx", "unit": "₹ lakh", "years": ["2025", "2026 (Prov)"],
+                            "rows": {"revenue": {"2025": 1102.55, "2026 (Prov)": 1876.30},
+                                     "tol_tnw": {"2026 (Prov)": 3.40}}},
+            "coverage": [{"area": "Bureau", "status": "not read", "read": [],
+                          "unread": [{"name": "W-1.pdf", "reason": "no text"}]}]}}
+    md = rg.report_markdown(g)
+    order = [md.index(h) for h in ("What the grade stands on", "Red flags", "Key figures",
+                                   "Hard red triggers", "Appendix A")]
+    assert order == sorted(order)
+    assert "🔴 **BOI CC overdrawn**" in md and "| Revenue (₹ lakh) | 1,102.55 | 1,876.30 |" in md
+    assert "| TOL / TNW | — | 3.40× |" in md and "| Unverified |" in md
+    assert "W-1.pdf — on file but not read (no text)" in md

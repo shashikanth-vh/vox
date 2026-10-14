@@ -152,6 +152,9 @@ export function toClientRow(e: any): ClientRow {
     city: e?.city || '',
     country: e?.country || '',
     address: e?.address || '',
+    keyPeople: Array.isArray(e?.key_people) ? e.key_people : [],
+    newsAliases: Array.isArray(e?.news_aliases) ? e.news_aliases : [],
+    newsWatch: e?.news_watch !== false,
   };
 }
 

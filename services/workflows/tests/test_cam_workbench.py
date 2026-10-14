@@ -44,9 +44,13 @@ class _RegisterStub:
         self.reports: dict[str, dict] = {}
         self.turns: list[dict] = []
         self._n = 0
+        # Register records by path (lending line, entity, deal); a path mapped to an int
+        # answers with that status — a role that may not read it.
+        self.records: dict[str, dict | int] = {}
 
     async def get(self, url, **kw):  # noqa: ANN001, ANN003
         u = str(url)
+        self.gets = [*getattr(self, "gets", []), (u, kw.get("params") or {})]
         if "/v1/documents/" in u and u.endswith("/content"):
             doc_id = u.split("/v1/documents/")[1].split("/")[0]
             if doc_id not in self.docs:
@@ -65,6 +69,11 @@ class _RegisterStub:
             row["turns"] = [t for t in self.turns if t["report_id"] == rid]
             return httpx.Response(200 if row else 404, json=row,
                                   request=httpx.Request("GET", u))
+        for path, rec in self.records.items():
+            if u.endswith(path):
+                if isinstance(rec, int):
+                    return httpx.Response(rec, request=httpx.Request("GET", u))
+                return httpx.Response(200, json=rec, request=httpx.Request("GET", u))
         return httpx.Response(404, request=httpx.Request("GET", u))
 
     async def post(self, url, **kw):  # noqa: ANN001, ANN003
@@ -360,6 +369,42 @@ def test_docx_and_unreadable_formats_extract_or_say_why():
     assert why and "no extractor" in why
 
 
+def test_html_bureau_report_reads_as_text_not_markup():
+    """A CIBIL CIR is a saved HTML page: an XML declaration, a large style block and
+    base64 logos around a little text. Read raw, the markup filled the per-document
+    cap before the score; it must come through as text — labelled or not."""
+    from app.cam import doc_format, extract_text
+
+    page = ('<?xml version="1.0" encoding="utf-16"?><html><head><title>CIR</title>'
+            "<style>" + ".c{color:#000;padding:2px}\n" * 20_000 + "</style>"
+            "<script>var x = '<td>noise</td>';</script></head><body>"
+            '<img src="data:image/png;base64,' + "A" * 200_000 + '"/>'
+            "<!-- hidden -->"
+            "<table><tr><td>CIBIL TRANSUNION SCORE(S)</td><td>Score</td>"
+            "<td>812</td></tr><tr><td>Overdue</td><td>&#8377; 0</td></tr>"
+            # The label and its attribute code sit in a one-row table INSIDE the row.
+            "<tr><td><table><tr><td>Maximum delinquency across all trades</td>"
+            "<td>(G311S)</td></tr></table></td><td><div>60-89 DPD</div></td></tr></table>"
+            "<p>Scoring Factors<br/>1. Presence of Delinquency</p></body></html>").encode()
+
+    for ctype in ("text/html; charset=utf-8", "application/octet-stream", ""):
+        text, reason = extract_text(ctype, page)
+        assert reason is None, ctype
+        assert "CIBIL TRANSUNION SCORE(S) | Score | 812" in text
+        assert "Overdue | ₹ 0" in text and "1. Presence of Delinquency" in text
+        assert "Maximum delinquency across all trades | (G311S) | 60-89 DPD" in text
+        assert "color:" not in text and "base64" not in text and "noise" not in text
+        assert "hidden" not in text and "<" not in text
+        assert len(text) < 600
+    assert doc_format("application/octet-stream", page) == "html"
+
+    _, why = extract_text("text/html", b"<html><body><style>p{}</style></body></html>")
+    assert why and "no text" in why
+    # Plain text that merely mentions a tag is still plain text.
+    text, reason = extract_text("text/plain", b"notes: use <html> for the page")
+    assert reason is None and text == "notes: use <html> for the page"
+
+
 async def test_the_sanction_letter_yields_cp_cs_and_covenants_as_data(monkeypatch):
     """extract-terms: the engine reads the letter and hands back the three lists —
     validated, frequency coerced to the register's vocabulary, nothing invented by the
@@ -498,6 +543,58 @@ async def test_export_docx_renders_the_box_content_as_word(monkeypatch):
     for expected in ("Credit Assessment Memo", "Borrower", "Advika Renewables",
                      "DSCR", "Tenor 60 months", "₹ 24 Cr", "11.5%", "CAM v1"):
         assert expected in text, expected
+
+
+def test_cam_title_block_renders_as_a_cover_led_by_the_borrower():
+    """The drafter's title block (plain lines under '# Credit Appraisal Memorandum')
+    becomes a cover page: the BORROWER in the largest type, the lender small at the
+    foot, dates and preparer as a label–value grid, then a page break. The export's
+    file title is not printed over it, and any other document renders as before."""
+    import io
+    import re
+    import zipfile
+    from xml.dom import minidom
+
+    from app.docx_out import markdown_to_docx
+
+    md = ("# Credit Appraisal Memorandum\n\n"
+          "Evam Finance Private Limited  \nAdvika Renewables Private Limited  \n"
+          "Private Limited Company, Bengaluru, Karnataka  \n"
+          "Proposed Facility: Term Loan — Rs. 2,400.00 lakh  \n"
+          "Rate 11.50% p.a. | Tenor 60 months  \nDocument date: 13-Oct-2026  \n"
+          "Banking data as of Jul-2026; Debt data as of 16-Jul-2026  \n"
+          "Prepared by: Credit Risk Group\n\n"
+          "## PROPOSAL SUMMARY\nBody.\n\n## SECTION 1: EXECUTIVE SUMMARY\nMore.\n")
+
+    def doc_xml(blob: bytes) -> str:
+        with zipfile.ZipFile(io.BytesIO(blob)) as z:
+            xml = z.read("word/document.xml").decode()
+        minidom.parseString(xml)
+        return xml
+
+    def size_of(xml: str, text: str) -> int:
+        m = re.search(r'<w:sz w:val="(\d+)"/>(?:(?!</w:r>).)*?<w:t[^>]*>'
+                      + re.escape(text) + '</w:t>', xml, re.S)
+        assert m, text
+        return int(m.group(1))
+
+    xml = doc_xml(markdown_to_docx(md, "CAM - Advika", cam=True))
+    sizes = [int(s) for s in re.findall(r'<w:sz w:val="(\d+)"/>', xml)]
+    assert size_of(xml, "Advika Renewables Private Limited") == max(sizes)
+    assert size_of(xml, "Evam Finance Private Limited") < max(sizes) / 2
+    assert "CAM - Advika" not in xml
+    for label, value in (("Document date", "13-Oct-2026"), ("Banking data as of", "Jul-2026"),
+                         ("Debt data as of", "16-Jul-2026"), ("Prepared by", "Credit Risk Group")):
+        assert f">{label}</w:t>" in xml and f">{value}</w:t>" in xml, label
+    assert "Rate 11.50% p.a.   ·   Tenor 60 months" in xml
+    # Cover, then PROPOSAL SUMMARY on page 2; SECTION 1 still on its own page.
+    cover_end = xml.index('<w:br w:type="page"/>')
+    assert cover_end < xml.index("PROPOSAL SUMMARY")
+    assert xml.count('<w:br w:type="page"/>') == 2
+
+    plain = doc_xml(markdown_to_docx("# Credit Appraisal Memorandum\n\n## A\nx\n",
+                                     "CAM v1", cam=True))
+    assert "CAM v1" in plain and "Credit Appraisal Memorandum" in plain
 
 
 async def test_export_docx_requires_markdown_and_the_api_key(monkeypatch):

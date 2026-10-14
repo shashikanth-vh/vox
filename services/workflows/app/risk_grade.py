@@ -35,6 +35,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.cam import extract_text, image_suffix, is_pdf
 from app.docx_out import markdown_to_docx
+from app.panorama_bridge import unpack_zip
+from app.risk_facts import coverage, facts_of, flags_from, key_figures, mask_ids
 
 log = get_logger("panorama.risk_grade")
 
@@ -46,6 +48,28 @@ _KEEP = {"interactions": 30, "documents": 80, "leads": 25, "deals": 25, "lending
 # Register rows that carry no current file to read.
 _SKIP_STATUS = {"Pending", "Rejected", "Superseded", "Expired", "Waived"}
 _OLE2 = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"          # Excel 97–2003 (.xls) container
+# The AI host accepts at most this many files per grade (RiskGradeIn.documents).
+_MAX_SENT = 40
+# A desk zip's members, typed by suffix for the reader (unpack_zip keeps only these).
+_MEMBER_CTYPE = {".pdf": "application/pdf", ".xls": "application/vnd.ms-excel",
+                 ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                 ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                 ".webp": "image/webp", ".tif": "image/tiff", ".tiff": "image/tiff"}
+
+
+def is_zip(name: str, ctype: str, blob: bytes) -> bool:
+    """A zip ARCHIVE of documents — not an .xlsx/.docx/.pptx, which are zips too and
+    carry [Content_Types].xml at their root. (Sniffing for "xl/" in the first bytes
+    mistook an archive holding an uncompressed .xlsx for a workbook.)"""
+    if not blob.startswith(b"PK"):
+        return False
+    import io
+    import zipfile
+    try:
+        names = zipfile.ZipFile(io.BytesIO(blob)).namelist()
+    except zipfile.BadZipFile:
+        return False
+    return "[Content_Types].xml" not in names
 # The Data Register stores a section as the UI's short code (documentsService.ts);
 # settings and reports use the names people see. Both are accepted.
 SECTION_NAMES = {"kyc": "KYC & Constitutional", "fin": "Financials", "bank": "Banking & Debt",
@@ -202,14 +226,36 @@ def _csv_like(ctype: str, blob: bytes, filename: str) -> bool:
             and not blob.startswith(_OLE2) and b"\x00" not in blob[:2048])
 
 
+_SEV = {"red": "🔴", "amber": "🟠", "info": "🔵"}
+_STATUS = {"read": "✓ read", "partly read": "◐ partly read", "not read": "✗ not read",
+           "no file": "— no file", "none found": "— none found"}
+_FIG = (("revenue", "Revenue (₹ lakh)", "{:,.2f}"), ("growth", "Revenue growth", "{:+.1f}%"),
+        ("ebitda", "EBITDA (₹ lakh)", "{:,.2f}"), ("ebitda_pct", "EBITDA margin", "pct"),
+        ("pat", "PAT (₹ lakh)", "{:,.2f}"), ("tnw", "Tangible net worth (₹ lakh)", "{:,.2f}"),
+        ("current_ratio", "Current ratio", "{:.2f}×"), ("tol_tnw", "TOL / TNW", "{:.2f}×"),
+        ("td_ebitda", "Total debt / EBITDA", "{:.2f}×"), ("dscr", "DSCR", "{:.2f}×"))
+
+
+def _cell(v: Any) -> str:
+    return str(v or "").replace("|", "/").replace("\n", " ").strip()
+
+
+def _trigger_status(status: str) -> str:
+    return {"Hit": "**HIT**", "Clear": "Clear", "Unknown": "Unverified"}.get(status, status)
+
+
 def report_markdown(g: dict[str, Any]) -> str:
-    """The grade as a report: everything the (i) shows, in reading order."""
+    """The grade as a credit reader needs it: the verdict, how much of the file it
+    stands on, the red flags PRISM read itself, the key numbers, the triggers, what
+    to do — and the rubric's working last, as the appendix."""
+    ev = g.get("evidence") or {}
     c = g.get("confidence_detail") or {}
     lines = [
-        f"# Risk grade — {g.get('company', '')}",
+        f"# Risk report — {g.get('company', '')}",
         "",
-        f"**Rating:** {g.get('label')} · **Score:** {g.get('score')}/100 · "
-        f"**Confidence:** {g.get('confidence_pct', '—')}% · **Action:** {g.get('action')}",
+        f"**{g.get('label')}** · **{g.get('score')}/100** · confidence "
+        f"{g.get('confidence_pct', g.get('confidence', '—'))}"
+        f"{'%' if g.get('confidence_pct') is not None else ''} · recommended: **{g.get('action')}**",
         "",
         g.get("verdict") or "",
         "",
@@ -217,54 +263,110 @@ def report_markdown(g: dict[str, Any]) -> str:
     if g.get("borderline"):
         lines += ["> Near a band line (45 / 70): a small change in the evidence can change "
                   "the colour.", ""]
-    lines += ["## How the score was built", "",
-              "| Pillar | Weight | Score | Points | Evidence |", "|---|---|---|---|---|"]
+    flags = ev.get("flags") or []
+    reds = sum(1 for f in flags if f.get("severity") == "red")
+    ambers = sum(1 for f in flags if f.get("severity") == "amber")
+    hits = [t for t in g.get("hard_triggers") or [] if t.get("status") == "Hit"]
+    unverified = [t for t in g.get("hard_triggers") or [] if t.get("status") == "Unknown"]
+    if ev:
+        lines += [f"**At a glance:** {reds} red flag(s), {ambers} amber · "
+                  f"{len(hits)} hard trigger(s) hit · {len(unverified)} trigger(s) unverified.", ""]
+
+    cov = ev.get("coverage") or []
+    if cov:
+        lines += ["## 1. What the grade stands on", "",
+                  "| Evidence | Status | Read | Not read (why) |", "|---|---|---|---|"]
+        for r in cov:
+            read = "; ".join(r.get("read") or []) or "—"
+            unread = "; ".join(f"{u['name']} ({u.get('reason') or 'not read'})"
+                               for u in r.get("unread") or []) or (r.get("note") or "—")
+            mark = " · checked by PRISM" if r.get("checked_by_prism") else ""
+            lines.append(f"| {r['area']} | {_STATUS.get(r['status'], r['status'])}{mark} | "
+                         f"{_cell(read)} | {_cell(unread)} |")
+        lines += ["", "*Checked by PRISM:* the file's key fields were read by PRISM itself, "
+                  "not only by the model.", ""]
+
+    if ev:
+        lines += ["## 2. Red flags", ""]
+        if flags:
+            lines += [f"- {_SEV.get(f['severity'], '•')} **{f['title']}** — {f['detail']} "
+                      f"*({f['source']})*" for f in flags]
+        else:
+            lines.append("- No red or amber flags in the files PRISM could check.")
+        lines.append("")
+
+    kf = ev.get("key_figures")
+    if kf and kf.get("rows"):
+        years = kf.get("years") or []
+        lines += [f"## 3. Key figures — {kf.get('source')}", "",
+                  "| | " + " | ".join(years) + " |", "|---|" + "---|" * len(years)]
+        for key, label, fmt in _FIG:
+            row = kf["rows"].get(key)
+            if not row:
+                continue
+            vals = []
+            for y in years:
+                v = row.get(y)
+                vals.append("—" if v is None else f"{v:.1%}" if fmt == "pct" else fmt.format(v))
+            lines.append(f"| {label} | " + " | ".join(vals) + " |")
+        lines.append("")
+
+    n = 4 if ev else 1
+    lines += [f"## {n}. Hard red triggers", "", "| Trigger (rubric STEP 1) | Status | Evidence |",
+              "|---|---|---|"]
+    lines += [f"| {_cell(t.get('trigger'))} | {_trigger_status(str(t.get('status')))} | "
+              f"{_cell(t.get('evidence'))} |" for t in g.get("hard_triggers") or []]
+    lines += ["", "*Unverified* = the evidence for it was not read; it is not a clear.", ""]
+
+    def block(title: str, items: list[str]) -> list[str]:
+        return [f"## {title}", "", *([f"- {i}" for i in items] or ["- None given."]), ""]
+
+    lines += block(f"{n + 1}. Risks", g.get("risks") or [])
+    lines += block(f"{n + 2}. Mitigants", g.get("mitigants") or [])
+    lines += block(f"{n + 3}. Conditions precedent (if proceeding)", g.get("conditions") or [])
+    gaps = list(g.get("data_gaps") or [])
+    for r in cov:
+        for u in r.get("unread") or []:
+            gaps.append(f"{u['name']} — on file but not read ({u.get('reason') or 'unknown'}); "
+                        "send it in a readable form")
+    lines += block(f"{n + 4}. Documents to request", gaps)
+    lines += [f"## {n + 5}. What would move the rating", "",
+              f"- **Up a band:** {g.get('move_up') or '—'}",
+              f"- **Down a band:** {g.get('move_down') or '—'}", ""]
+
+    lines += ["## Appendix A — How the score was built", "",
+              "| Pillar | Weight | Score /10 | Points | Evidence |", "|---|---|---|---|---|"]
     for p in g.get("pillars") or []:
-        pts = p.get("weighted") if p.get("available") else "not scored (no data)"
-        ev = str(p.get("evidence", "")).replace("|", "/").replace("\n", " ")
+        pts = p.get("weighted") if p.get("available") else "no data — left out"
         lines.append(f"| {p.get('key')}. {p.get('name')} | {p.get('weight')}% | "
-                     f"{p.get('score')}/10 | {pts} | {ev} |")
+                     f"{p.get('score') if p.get('available') else '—'} | {pts} | "
+                     f"{_cell(p.get('evidence'))} |")
     lines += ["", "Bands: GREEN ≥ 70 · AMBER 45–69 · RED < 45, scored over the pillars "
               "that have data. Any hard trigger → RED. No financials or banking → never "
               "GREEN (PROVISIONAL).", ""]
     if c:
-        lines += ["## Confidence", "",
-                  f"{g.get('confidence_pct')}% = 60% × data coverage ({c.get('data_coverage')}% "
-                  f"of the rubric's weight had data) + 40% × agreement ({c.get('agreement')}% — "
-                  f"the independent readings spread {c.get('spread')} points).", ""]
+        lines += [f"Confidence {g.get('confidence_pct')}% = 60% × data coverage "
+                  f"({c.get('data_coverage')}% of the rubric's weight had data) + 40% × "
+                  f"agreement ({c.get('agreement')}% — the independent readings spread "
+                  f"{c.get('spread')} points).", ""]
     if g.get("runs"):
         lines += [f"Independent readings: {', '.join(str(r.get('score')) for r in g['runs'])} "
-                  "(per-pillar median shown).", ""]
-    lines += ["## Hard red triggers", ""]
-    lines += [f"- **{t.get('status')}** — {t.get('trigger')}"
-              + (f": {t.get('evidence')}" if t.get("evidence") else "")
-              for t in g.get("hard_triggers") or []] or ["- Not reported."]
-
-    def block(title: str, items: list[str]) -> list[str]:
-        return ["", f"## {title}", "", *([f"- {i}" for i in items] or ["- None given."])]
-
-    lines += block("Top risks", g.get("risks") or [])
-    lines += block("Top mitigants", g.get("mitigants") or [])
-    lines += block("Data gaps — documents to request", g.get("data_gaps") or [])
-    lines += ["", "## What would move it", "", f"- Up: {g.get('move_up') or '—'}",
-              f"- Down: {g.get('move_down') or '—'}"]
-    if g.get("conditions"):
-        lines += block("Conditions (if proceeding)", g["conditions"])
+                  "(each pillar takes the median).", ""]
     if g.get("adjustments"):
-        lines += block("Rubric overrides", g["adjustments"])
+        lines += block("Appendix B — Where the rules corrected the model", g["adjustments"])
     inp = g.get("inputs") or {}
-    lines += ["", "## Built from", ""]
     docs = inp.get("documents") or []
+    lines += ["## Appendix C — Files", ""]
     if docs:
-        lines += ["| Document | Section | Read by | Used |", "|---|---|---|---|"]
+        lines += ["| File | Section | Read by | Used |", "|---|---|---|---|"]
         for d in docs:
             used = ((f"yes — {d['note']}" if d.get("note") else "yes") if d.get("used")
                     else f"no — {d.get('reason', '')}")
-            lines.append(f"| {d.get('name')} | {d.get('section') or '—'} | "
-                         f"{', '.join(d.get('engines') or []) or '—'} | {used} |")
+            lines.append(f"| {_cell(d.get('name'))} | {d.get('section') or '—'} | "
+                         f"{', '.join(d.get('engines') or []) or '—'} | {_cell(used)} |")
         lines.append("")
     else:
-        lines += [f"- Documents: none ({inp.get('document_note') or 'no files in the graded sections'})"]
+        lines += [f"- Documents: none ({inp.get('document_note') or 'no files in the graded sections'})", ""]
     lines += [f"- Register: {inp.get('lending_lines', 0)} lending line(s), "
               f"{inp.get('platform_deals', 0)} platform deal(s), "
               f"{inp.get('interactions', 0)} interaction(s)",
@@ -274,8 +376,9 @@ def report_markdown(g: dict[str, Any]) -> str:
         lines.append(f"- Hidden from the requesting role: {', '.join(inp['register_sections_hidden'])}")
     lines += ["", "---", "",
               f"{g.get('engine')} · rubric {g.get('prompt')} ({g.get('prompt_version')}) · "
-              f"graded {g.get('generated_at')} by {g.get('generated_by')}. AI-assisted: a desk "
-              "aid, not a credit decision."]
+              f"graded {g.get('generated_at')} by {g.get('generated_by')}. Flags and key figures "
+              "are read by PRISM from the files; pillar scores, risks and conditions are "
+              "AI-assisted. A desk aid, not a credit decision."]
     return "\n".join(lines)
 
 
@@ -386,13 +489,25 @@ def mount_risk_grade(app: Any, settings: Any, *, denied: Any, verified_email: An
         return list(unique.values()), None
 
     async def _documents(request: Request, caller: Any, who: str,
-                         rows: list[dict]) -> tuple[list[dict], list[dict]]:
-        """(texts for the grader, every file's fate). Nothing is copied anywhere —
-        text travels. A fate whose read failed for a passing reason carries
+                         rows: list[dict]) -> tuple[list[dict], list[dict], list[dict]]:
+        """(texts for the grader, every file's fate, the facts PRISM read itself).
+        Nothing is copied anywhere — text travels, with ID numbers masked. A zip is
+        opened and each file in it read and listed on its own ("Bank Statements.zip /
+        BOI Apr–Jun.pdf"). Facts are read from each file's FULL text, before the
+        budget clips it. A fate whose read failed for a passing reason carries
         ``transient`` so that grade is never remembered as "the" grade of these files."""
         gate = asyncio.Semaphore(4)
 
-        async def one(d: dict) -> dict:
+        async def read_one(fate: dict, doc_id: str, blob: bytes, ctype: str,
+                           name: str) -> dict:
+            text, reason, engines, cached = await _extract(request, doc_id, blob, ctype, name)
+            transient = reason is not None and (reason.startswith("document AI unreachable")
+                                                or "(HTTP 5" in reason)
+            return {**fate, "engines": engines, "cached": cached, "text": text,
+                    **({"reason": reason} if reason else {}),
+                    **({"transient": True} if transient else {})}
+
+        async def one(d: dict) -> list[dict]:
             name = d.get("original_filename") or d.get("title") or "document"
             fate: dict[str, Any] = {"name": name, "section": section_name(d.get("section")),
                                     "title": d.get("title"), "used": False,
@@ -404,33 +519,46 @@ def mount_risk_grade(app: Any, settings: Any, *, denied: Any, verified_email: An
                         f"{base}{cpath}", headers=reg_headers(request, caller, who, "GET", cpath),
                         follow_redirects=True, timeout=60.0)
                 except httpx.HTTPError as exc:
-                    return {**fate, "transient": True,
-                            "reason": f"register read failed ({exc.__class__.__name__})"}
+                    return [{**fate, "transient": True,
+                             "reason": f"register read failed ({exc.__class__.__name__})"}]
                 if got.status_code >= 300:
-                    return {**fate, "transient": got.status_code >= 500,
-                            "reason": f"register refused the read (HTTP {got.status_code})"}
-                text, reason, engines, cached = await _extract(
-                    request, str(d.get("id")), got.content,
-                    got.headers.get("content-type") or d.get("content_type") or "", name)
-                transient = reason is not None and (reason.startswith("document AI unreachable")
-                                                    or "(HTTP 5" in reason)
-                return {**fate, "engines": engines, "cached": cached, "text": text,
-                        **({"reason": reason} if reason else {}),
-                        **({"transient": True} if transient else {})}
+                    return [{**fate, "transient": got.status_code >= 500,
+                             "reason": f"register refused the read (HTTP {got.status_code})"}]
+                ctype = got.headers.get("content-type") or d.get("content_type") or ""
+                if not is_zip(name, ctype, got.content):
+                    return [await read_one(fate, str(d.get("id")), got.content, ctype, name)]
+                members, skips = unpack_zip(got.content, name)
+                out = [{**fate, "name": s["file"].replace(f"{name}/", f"{name} / ", 1),
+                        "in_zip": name, "reason": s["reason"]} for s in skips]
+                for i, (member, data, suffix) in enumerate(members):
+                    out.append(await read_one(
+                        {**fate, "name": f"{name} / {member}", "in_zip": name},
+                        f"{d.get('id')}-{i}", data, _MEMBER_CTYPE.get(suffix, ""), member))
+                return out or [{**fate, "reason": "the zip holds no files"}]
 
-        fates = list(await asyncio.gather(*(one(d) for d in rows)))
+        fates = [f for group in await asyncio.gather(*(one(d) for d in rows)) for f in group]
         read = [(f, f.pop("text", "") or "") for f in fates]
+        facts = [x for f, t in read if t.strip()
+                 for x in facts_of(f["name"].rsplit(" / ", 1)[-1], t)]
         read = [(f, t) for f, t in read if t.strip()]
+        # Most-telling kinds first (actuals before projections, newest year first):
+        # the AI host takes at most _MAX_SENT files, and the rest are named, not dropped.
+        read.sort(key=lambda ft: read_order({"title": ft[0].get("title"),
+                                             "original_filename": ft[0]["name"]}))
+        for f, _t in read[_MAX_SENT:]:
+            f["reason"] = (f"not sent: one grade reads at most {_MAX_SENT} files, and "
+                           "higher-priority kinds came first")
+        read = read[:_MAX_SENT]
         shares = share_budget([len(t) for _f, t in read], doc_max, docs_total)
         texts: list[dict] = []
         for (f, full), room in zip(read, shares, strict=True):
-            text = clip_middle(full, room)
+            text = clip_middle(mask_ids(full), room)
             f.update(used=True, chars=len(text),
                      **({"note": f"clipped: {len(text):,} of {len(full):,} characters, "
                                  "beginning and end kept"} if len(full) > room else {}))
             texts.append({"name": f["name"], "section": f["section"], "title": f["title"],
                           "engines": f["engines"], "text": text})
-        return texts, fates
+        return texts, fates, facts
 
     # ------------------------------------------------------------------ PULSE
     async def _pulse(request: Request, p: dict, company: str) -> tuple[list[dict], str | None]:
@@ -587,8 +715,30 @@ def mount_risk_grade(app: Any, settings: Any, *, denied: Any, verified_email: An
             # answered before any file is downloaded or read again.
             log.info("risk_grade_unchanged", extra={"company": company, "by": who})
             return {**prior[1], "unchanged": True}, None
-        docs, fates = await _documents(request, caller, who, rows) if rows else ([], [])
-        sent = {"company": company, "panorama": trimmed, "news": news, "documents": docs}
+        docs, fates, facts = (await _documents(request, caller, who, rows) if rows
+                              else ([], [], []))
+        flags = flags_from(facts)
+        figures = key_figures(facts)
+        unread = sorted({f.get("in_zip") or f["name"] for f in fates if not f.get("used")}
+                        - {f.get("in_zip") or f["name"] for f in fates if f.get("used")})
+        # Tell the model which listed files it actually has: a file NAME is never
+        # evidence ("GSTR3B Reports.zip uploaded" cleared a statutory trigger once).
+        fate_of: dict[str, bool] = {}
+        for f in fates:
+            fname = (f.get("in_zip") or f["name"]).lower()
+            fate_of[fname] = bool(fate_of.get(fname) or f.get("used"))
+        for row in trimmed.get("documents") or []:
+            if isinstance(row, dict) and (fn := str(row.get("filename") or "").lower()) in fate_of:
+                row["read_by_grade"] = "yes" if fate_of[fn] else "NO — not evidence"
+        sent = {"company": company, "panorama": trimmed, "news": news, "documents": docs,
+                "facts": {"flags": flags, "key_figures": figures, "unread_files": unread,
+                          "bureau_scores": [{"person": f["person"], "score": f["score"]}
+                                            for f in facts if f["kind"] == "cir"],
+                          "read_files": [f["name"] for f in fates if f.get("used")],
+                          "triggers": [{"clause": f["trigger"],
+                                        "evidence": f"{f['title']} — {f['detail']} "
+                                                    f"({f['source']})"}
+                                       for f in flags if f.get("trigger")]}}
         # The AI host sits behind the same private-CA edge as its DocRAG: the client
         # built with that CA (WORKFLOWS_DOCRAG_CA_FILE) is the one that trusts it.
         http = getattr(request.app.state, "docrag_http", None) or request.app.state.http
@@ -621,7 +771,9 @@ def mount_risk_grade(app: Any, settings: Any, *, denied: Any, verified_email: An
                                       "documents_used": sum(1 for f in fates if f.get("used")),
                                       "news": len(news)})
         result = {**grade, "inputs": inputs, "generated_by": who, "entity_id": entity_id,
-                  "unchanged": False}
+                  "unchanged": False,
+                  "evidence": {"flags": flags, "key_figures": figures,
+                               "coverage": coverage(fates, facts, len(news), news_note)}}
         if any(f.get("transient") for f in fates):
             # A file could not be read this time (DocRAG restarting, a Register blip):
             # the next regrade must read again, not repeat this short-handed grade.

@@ -78,10 +78,11 @@ async def test_a_sweep_answers_every_term_in_the_order_it_was_asked(monkeypatch)
 async def test_the_terms_actually_overlap(monkeypatch):
     """THE POINT OF THE WHOLE CHANGE. Eight terms against an upstream that takes 200ms
     must not cost 8 x 200ms. Sequentially this is >=1.6s; overlapped at six at a time it
-    is two waves, well under a second."""
+    is two waves, well under a second. (Per-source spacing is off here: against the real
+    sources it, not the overlap, sets the pace — see SourceGate.)"""
     _feeds(monkeypatch, delay=0.2)
     t0 = time.monotonic()
-    rows = await NewsSearch().sweep([f"Firm {i}" for i in range(8)], concurrency=6)
+    rows = await NewsSearch(pace=False).sweep([f"Firm {i}" for i in range(8)], concurrency=6)
     elapsed = time.monotonic() - t0
 
     assert len(rows) == 8 and all(r["count"] > 0 for r in rows)

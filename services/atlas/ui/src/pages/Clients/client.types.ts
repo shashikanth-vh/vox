@@ -1,3 +1,10 @@
+/** A director or promoter the News Radar watches with the firm. `city` narrows a
+ *  common name to the one who runs this company. */
+export interface KeyPerson {
+  name: string;
+  role?: string;
+  city?: string;
+}
 export interface Client {
   name: string;
   sector: string;
@@ -16,5 +23,11 @@ export interface Client {
   city?: string;
   country?: string;
   address?: string;
+  /** Directors / promoters searched in the news digest alongside the firm. */
+  keyPeople?: KeyPerson[];
+  /** Names the news digest searches the firm by ("Enerparc"); when set, the whole list. */
+  newsAliases?: string[];
+  /** false = left out of the news digest (a placeholder, a place, a person). */
+  newsWatch?: boolean;
 }
 export interface ClientRow extends Client { code: string; }

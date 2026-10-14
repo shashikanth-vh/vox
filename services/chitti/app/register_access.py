@@ -79,7 +79,8 @@ RESOURCE_SPECS: Final[dict[str, ResourceSpec]] = {
                 "last_interaction_date",
             }
         ),
-        frozenset({"company", "contact", "rm", "notes"}),
+        # The Register searches leads by number too (develop, enquiries): "find L-0042".
+        frozenset({"company", "contact", "rm", "notes", "lead_no"}),
     ),
     "deals": ResourceSpec(
         "/v1/deals",
@@ -120,7 +121,7 @@ RESOURCE_SPECS: Final[dict[str, ResourceSpec]] = {
                 "pending_with",
             }
         ),
-        frozenset({"tracker_no", "remarks", "toi"}),
+        frozenset({"tracker_no", "remarks", "toi", "rm", "analyst"}),
     ),
     "syndication_lenders": ResourceSpec(
         "/v1/syndication-lenders",
@@ -135,7 +136,7 @@ RESOURCE_SPECS: Final[dict[str, ResourceSpec]] = {
             "status", "nature", "entity_id", "deal_id", "state", "investor_type",
             "deal_type", "teaser_date", "rm", "analyst", "investor",
         }),
-        frozenset({"investor", "notes"}),
+        frozenset({"investor", "notes", "rm", "analyst"}),
     ),
 }
 RESOURCE_PATHS: Final[dict[str, str]] = {resource: spec.path for resource, spec in RESOURCE_SPECS.items()}
