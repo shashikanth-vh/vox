@@ -212,7 +212,7 @@ export default function SchedulesDialog({ open, onClose, prefillAll }: { open: b
                 })()}
               </Box>
               <Button onClick={() => startEdit(s)}>Edit</Button>
-              <Button onClick={() => act(pulseService.runSchedule(s.id))}>Run now</Button>
+              <Button onClick={() => act(pulseService.runSchedule(s.id), 'Started.')}>Run now</Button>
               <Button color="error" onClick={() => act(pulseService.deleteSchedule(s.id))}>Delete</Button>
             </Box>
             {openId === s.id && (

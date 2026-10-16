@@ -168,7 +168,7 @@ class ScheduleStore:
         return None
 
     def record_run(self, sid: str, *, ok: bool, note: str,
-                   firms: int = 0, items: int = 0) -> None:
+                   firms: int = 0, items: int = 0, seconds: float | None = None) -> None:
         """Append one run outcome to the schedule's history — the desk's answer to
         "did Monday's digest actually go out?". Best-effort persist: a history write
         must never kill the loop."""
@@ -177,7 +177,8 @@ class ScheduleStore:
                 if s.get("id") == sid:
                     hist = s.setdefault("history", [])
                     hist.append({"at": time.time(), "ok": bool(ok),
-                                 "note": str(note)[:300], "firms": firms, "items": items})
+                                 "note": str(note)[:300], "firms": firms, "items": items,
+                                 **({"seconds": round(seconds, 1)} if seconds else {})})
                     del hist[:-MAX_HISTORY]
                     self.save(strict=False)
                     return
@@ -265,6 +266,10 @@ def trading_name(name: str) -> str:
 # purpose: Google News and Bing answer a polite client and throttle a greedy one (the
 # search engine's own upstream pool caps it again underneath).
 DIGEST_CONCURRENCY = 6
+# Extra passes over firms whose search had a gap, before the email goes out.
+RETRY_PASSES = 2
+# No retry pass starts once the run has been searching this long.
+RETRY_PASS_BUDGET_S = 45 * 60
 
 
 class Watch:
@@ -391,6 +396,7 @@ async def run_schedule(schedule: dict[str, Any], *, search: Callable, send: Call
                        firm_terms: Callable | None = None,
                        already_sent: set[str] | None = None,
                        on_sent: Callable[[list[str]], None] | None = None,
+                       send_at: float | None = None,
                        ) -> tuple[bool, str, int, int]:
     """Search every term on the schedule, then email one digest. Firms with nothing to
     report are LEFT OUT rather than listed as empty — a digest of silence is noise.
@@ -406,7 +412,10 @@ async def run_schedule(schedule: dict[str, Any], *, search: Callable, send: Call
 
     ONLY NEW (the default): a story this schedule already sent is not sent again —
     ``already_sent`` is what went out before, ``on_sent`` is told what went out now,
-    once the send succeeded. The same Satyendar Jain arrest used to arrive every week."""
+    once the send succeeded. The same Satyendar Jain arrest used to arrive every week.
+
+    ``send_at`` (a POSIX time): the scheduler starts the search early and the email is
+    held until then, so careful pacing never makes a digest late."""
     dto = datetime.now(desk_tz()).strftime("%Y-%m-%d")
     window = int(schedule.get("window_days", 7))
     dfrom = (datetime.now(desk_tz()) - timedelta(days=window)).strftime("%Y-%m-%d")
@@ -440,8 +449,33 @@ async def run_schedule(schedule: dict[str, Any], *, search: Callable, send: Call
                                               "only_new": only_new})
     t0 = time.time()
     gate = asyncio.Semaphore(DIGEST_CONCURRENCY)
-    found = await asyncio.gather(*(_search_firm(w, search, dfrom, dto, gate)
-                                   for w in watches))
+    found = list(await asyncio.gather(*(_search_firm(w, search, dfrom, dto, gate)
+                                        for w in watches)))
+    # NO FIRM LEFT BEHIND: a firm whose search had a gap (a source throttled past its
+    # retries, a timeout) is searched again, up to RETRY_PASSES more times, before the
+    # email goes out. Only what is still missing after that is reported as such.
+    retried = 0
+    for _ in range(RETRY_PASSES):
+        gaps = [i for i, (_, down) in enumerate(found) if down]
+        if not gaps:
+            break
+        if time.time() - t0 > RETRY_PASS_BUDGET_S:
+            # A source that is down for the morning is reported, not chased for hours.
+            log.warning("pulse_schedule_retry_budget_spent",
+                        extra={"id": schedule.get("id"), "firms": len(gaps)})
+            break
+        retried += len(gaps)
+        log.info("pulse_schedule_retry_pass", extra={"id": schedule.get("id"),
+                                                     "firms": len(gaps)})
+        again = await asyncio.gather(*(_search_firm(watches[i], search, dfrom, dto, gate)
+                                       for i in gaps))
+        for i, res in zip(gaps, again, strict=True):
+            found[i] = res
+    # The search time (not the hold below) is what the next lead time is learnt from.
+    schedule["_search_seconds"] = round(time.time() - t0, 1)
+    if send_at is not None and send_at > time.time():
+        # Searched early so the email lands at the scheduled minute, not after the run.
+        await asyncio.sleep(send_at - time.time())
     groups: list[tuple[str, list[dict[str, Any]]]] = []
     repeats = 0
     # Which sources were not searched, for how many firms, and why (first reason seen).
@@ -478,11 +512,37 @@ async def run_schedule(schedule: dict[str, Any], *, search: Callable, send: Call
                                            "seconds": round(time.time() - t0, 1),
                                            "firms": len(groups), "items": total,
                                            "repeats_skipped": repeats,
+                                           "retried_firms": retried,
                                            "sources_down": down_count, "result": msg})
-    if down_count:
+    if not down_count:
+        msg += f" — all {len(watches)} firms searched on every source"
+    else:
         msg += " — not searched: " + ", ".join(
             f"{src} for {n} of {len(watches)} firms" for src, n in down_count.items())
     return ok, msg, len(groups), total
+
+
+# Lead time for a schedule with no history yet: an all-firms digest at the measured
+# Google pacing (~2.5 s a firm) takes 20-25 minutes for 500 firms.
+DEFAULT_LEAD_S = 20 * 60
+MAX_LEAD_S = 3 * 3600
+
+
+def lead_seconds(schedule: dict[str, Any]) -> float:
+    """How long before its slot a schedule's search should start: the slowest of its
+    last three searches, plus a quarter and five minutes; the default when unknown."""
+    took = [float(h["seconds"]) for h in (schedule.get("history") or [])[-3:]
+            if isinstance(h, dict) and h.get("seconds")]
+    if not took:
+        return DEFAULT_LEAD_S
+    return min(max(took) * 1.25 + 300, MAX_LEAD_S)
+
+
+def _permanent(msg: str) -> bool:
+    """A failure no retry can fix. Email that is not configured stays not configured;
+    retrying it re-ran the whole all-firms search three more times each morning on
+    cipher-test (four Google sweeps in 40 minutes) for an email that could not go."""
+    return msg.startswith("Email is not configured")
 
 
 async def scheduler_loop(store: ScheduleStore, runner: Callable, *,
@@ -504,7 +564,11 @@ async def scheduler_loop(store: ScheduleStore, runner: Callable, *,
                     due = float(s.get("next_run") or 0)
                 except (TypeError, ValueError):
                     continue
-                if due > now:
+                # Start EARLY by the time the search takes, and hold the email until the
+                # slot: pacing that keeps Google answering must not make a digest late.
+                # (A retry after a failed send keeps its own short delay: no lead.)
+                lead = 0.0 if int(s.get("retry") or 0) else lead_seconds(s)
+                if due - lead > now:
                     continue
                 # Re-arm BEFORE running: a slow or failing run must not be retried in a
                 # tight loop against the recipients' inboxes.
@@ -513,7 +577,7 @@ async def scheduler_loop(store: ScheduleStore, runner: Callable, *,
                                                        int(s.get("weekday", 0))),
                             last_run=now)
                 try:
-                    res = await runner(s)
+                    res = await runner(s, send_at=due)
                     ok, msg, firms, items = (res if isinstance(res, tuple) and len(res) == 4
                                              else (True, "", 0, 0))
                 except Exception as exc:  # noqa: BLE001 - one bad schedule keeps the loop
@@ -524,8 +588,9 @@ async def scheduler_loop(store: ScheduleStore, runner: Callable, *,
                 if ok:
                     if attempt:
                         store.touch(s["id"], retry=0)
-                    store.record_run(s["id"], ok=True, note=msg, firms=firms, items=items)
-                elif attempt < MAX_RETRIES:
+                    store.record_run(s["id"], ok=True, note=msg, firms=firms, items=items,
+                                     seconds=s.pop("_search_seconds", None))
+                elif attempt < MAX_RETRIES and not _permanent(msg):
                     # The day's digest is not lost to one SMTP hiccup: come back soon,
                     # a bounded number of times, then concede until the next slot.
                     store.touch(s["id"], next_run=time.time() + RETRY_DELAY_S,
@@ -536,7 +601,10 @@ async def scheduler_loop(store: ScheduleStore, runner: Callable, *,
                 else:
                     store.touch(s["id"], retry=0)
                     store.record_run(s["id"], ok=False, firms=firms, items=items,
-                                     note=f"{msg} — giving up until the next slot")
+                                     note=f"{msg} — " + ("not retried: fix the setting first"
+                                                         if _permanent(msg) else
+                                                         "giving up until the next slot"),
+                                     seconds=s.pop("_search_seconds", None))
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - the loop itself must never die

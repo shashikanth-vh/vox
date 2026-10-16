@@ -178,6 +178,8 @@ def create_app() -> FastAPI:
             cache_ttl_s=settings.search_cache_ttl_s, cache_max=settings.search_cache_max,
             upstream_concurrency=settings.upstream_concurrency)
         app.state.schedules = sched.ScheduleStore(settings.schedule_file)
+        app.state.running_schedules = set()   # ids with a "Run now" in progress
+        app.state.background_runs = set()     # their tasks, kept referenced
         # The permissions failure class announces itself on boot, not weeks later as
         # "my schedules vanished".
         writable, why = app.state.schedules.probe()
@@ -344,7 +346,8 @@ def create_app() -> FastAPI:
             return firms
         return _fetch
 
-    async def _run_one_schedule(schedule: dict) -> tuple[bool, str, int, int]:
+    async def _run_one_schedule(schedule: dict, send_at: float | None = None,
+                                ) -> tuple[bool, str, int, int]:
         """The scheduler's callback — searches, then emails. Bound here so it closes over
         this app's engine and settings rather than reaching for a global."""
         return await sched.run_schedule(
@@ -355,7 +358,8 @@ def create_app() -> FastAPI:
             digest=digest_page,
             firm_terms=_firm_terms_for(schedule),
             already_sent=app.state.schedules.sent_keys(schedule["id"]),
-            on_sent=lambda keys: app.state.schedules.remember_sent(schedule["id"], keys))
+            on_sent=lambda keys: app.state.schedules.remember_sent(schedule["id"], keys),
+            send_at=send_at)
 
     @app.get("/v1/news/search", tags=["News Radar"],
              summary="Search the news for a term (Google News + GDELT + Bing, merged)")
@@ -693,22 +697,47 @@ def create_app() -> FastAPI:
         if schedule is None:
             return ORJSONResponse(status_code=404,
                                   content={"ok": False, "message": "No such schedule."})
-        ok, msg, firms, items = await sched.run_schedule(
-            schedule,
-            search=lambda term, dfrom, dto, **kw: request.app.state.search.search_detail(
-                term, dfrom, dto, **kw),
-            send=lambda to, subject, body: send_email(settings.smtp(), to, subject, body),
-            digest=digest_page,
-            firm_terms=_firm_terms_for(schedule),
-            already_sent=request.app.state.schedules.sent_keys(schedule["id"]),
-            on_sent=lambda keys: request.app.state.schedules.remember_sent(
-                schedule["id"], keys))
-        request.app.state.schedules.record_run(schedule["id"], ok=ok,
-                                               note=f"run now: {msg}",
-                                               firms=firms, items=items)
-        return ORJSONResponse(status_code=200 if ok else 400,
-                              content={"ok": ok, "message": msg,
-                                       "firms": firms, "items": items})
+        # IN THE BACKGROUND. An all-firms digest paced to what Google tolerates takes
+        # ~20 minutes; held inside the request it met the edge's 65 s limit first. The
+        # run is started and the answer is immediate; the outcome lands in the
+        # schedule's history ("Last run"), exactly like a scheduled run's.
+        store = request.app.state.schedules
+        running: set[str] = request.app.state.running_schedules
+        sid = schedule["id"]
+        if sid in running:
+            return ORJSONResponse(status_code=409, content={
+                "ok": False, "message": "Already running — its result will appear "
+                                       "under Last run."})
+
+        async def job() -> None:
+            try:
+                ok, msg, firms, items = await sched.run_schedule(
+                    schedule,
+                    search=lambda term, dfrom, dto, **kw: app.state.search.search_detail(
+                        term, dfrom, dto, **kw),
+                    send=lambda to, subject, body: send_email(settings.smtp(), to,
+                                                              subject, body),
+                    digest=digest_page,
+                    firm_terms=_firm_terms_for(schedule),
+                    already_sent=store.sent_keys(sid),
+                    on_sent=lambda keys: store.remember_sent(sid, keys))
+                store.record_run(sid, ok=ok, note=f"run now: {msg}", firms=firms,
+                                 items=items, seconds=schedule.pop("_search_seconds", None))
+            except Exception as exc:  # noqa: BLE001 - recorded, never raised into the loop
+                log.exception("pulse_schedule_run_now_failed", extra={"id": sid})
+                store.record_run(sid, ok=False, note=f"run now crashed: {exc}")
+            finally:
+                running.discard(sid)
+
+        running.add(sid)
+        task = asyncio.create_task(job())
+        request.app.state.background_runs.add(task)
+        task.add_done_callback(request.app.state.background_runs.discard)
+        minutes = max(1, round(sched.lead_seconds(schedule) / 60))
+        return ORJSONResponse(status_code=202, content={
+            "ok": True, "started": True,
+            "message": f"Running in the background (about {minutes} min); the result "
+                       "will appear under Last run."})
 
     return app
 

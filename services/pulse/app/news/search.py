@@ -172,62 +172,122 @@ def _ok(name: str, count: int) -> dict[str, Any]:
 
 
 def _failed(name: str, exc: Any) -> dict[str, Any]:
-    return {"name": name, "ok": False, "count": 0, "error": _reason(exc)}
+    out = {"name": name, "ok": False, "count": 0, "error": _reason(exc)}
+    # 503 (Google's automated-traffic page) and 429 mean "slower", not "broken".
+    if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in (429, 503):
+        out["throttled"] = True
+    return out
 
 
 class SourceGate:
-    """Spacing and a breaker for ONE upstream — what the 13 Oct live run was missing.
+    """Pacing for ONE upstream, that slows down when told to and never gives up on a
+    search because the source said "not so fast".
 
-    Six firms searched at once asked Google News for six feeds at once, over and over,
-    and Google answered with its automated-traffic page (HTTP 503) for 365 of 489
-    firms; GDELT says outright "one request every 5 seconds" and answered 429 for 389.
-    Each source now gets requests no closer together than ``interval`` seconds,
-    whatever the concurrency above it. A source that fails ``trip_after`` times in a
-    row is paused for ``cooldown`` seconds instead of being hammered, and every search
-    in that time reports it as not searched — never as searched and empty.
+    What the live runs taught: Google News answers a steady trickle (150 searches 2.5 s
+    apart from a cloud host, all 200) and blocks a burst with its automated-traffic
+    page (HTTP 503) — 335 of 525 firms in the 14 Oct production digest at 1.5 s. The
+    block lifts on its own. So a throttle (503 / 429) is not a failure of the search:
 
-    ``enter(max_wait)``: wait for the next slot and return None, or return the reason
-    the source is skipped (paused, or the slot is further off than ``max_wait``)."""
+      * ``throttled()`` pauses the whole lane (60 s, doubling to 15 min), and widens the
+        spacing (x1.5, up to ``max_interval``); the caller then RETRIES the same search.
+      * ``done(True)`` counts successes; after 25 in a row the spacing eases back toward
+        ``interval`` and the pause step resets.
+      * Any other failure (no route, a timeout) is a real one: ``trip_after`` of those
+        in a row pause the lane for ``cooldown`` and searches report it as not searched.
+
+    ``enter(max_wait)`` waits for the next slot — through a throttle pause too — and
+    returns None, or the reason the source is skipped when the wait would exceed
+    ``max_wait`` (an interactive search does not sit out a 15-minute pause)."""
 
     def __init__(self, name: str, interval: float, *, trip_after: int = 4,
-                 cooldown: float = 600.0) -> None:
-        self.name, self.interval = name, interval
+                 cooldown: float = 600.0, max_interval: float | None = None,
+                 pause: float = 60.0, max_pause: float = 900.0) -> None:
+        self.name, self.base, self.interval = name, interval, interval
+        self.max_interval = max_interval if max_interval is not None else interval * 4
         self.trip_after, self.cooldown = trip_after, cooldown
+        self.pause_base, self.max_pause, self._pause = pause, max_pause, pause
         self._next = 0.0
         self._fails = 0
-        self._paused_until = 0.0
+        self._wins = 0
+        self._broken_until = 0.0     # real failures: skip until then
+        self._throttled_until = 0.0  # a throttle: wait until then
+        self._last_throttle = -1.0   # when the last throttle was taken (monotonic)
+        self.throttles = 0
 
     async def enter(self, max_wait: float | None = None) -> str | None:
         now = time.monotonic()
-        if now < self._paused_until:
+        if now < self._broken_until:
             return (f"paused after {self.trip_after} failures in a row; "
-                    f"tried again in {int(self._paused_until - now) // 60 + 1} min")
-        slot = max(now, self._next)
+                    f"tried again in {int(self._broken_until - now) // 60 + 1} min")
+        slot = max(now, self._next, self._throttled_until)
         if max_wait is not None and slot - now > max_wait:
+            if now < self._throttled_until:
+                return "asking too fast for it right now; not asked for this search"
             return f"not asked: it allows one request every {self.interval:g} s"
         # Claimed before sleeping (no await in between), so concurrent callers queue.
         self._next = slot + self.interval
         if slot > now:
             await asyncio.sleep(slot - now)
+        # A throttle may have landed while this caller waited for its slot: nothing goes
+        # out during a pause (cipher-test, 15 Oct: requests queued before Google said
+        # "stop" went out anyway, each read as a new refusal, and the pause climbed from
+        # 60 s to 15 min in under three minutes).
+        while (wait := self._throttled_until - time.monotonic()) > 0:
+            if max_wait is not None:
+                return "asking too fast for it right now; not asked for this search"
+            await asyncio.sleep(wait)
         return None
+
+    def throttled(self, sent_at: float | None = None) -> float:
+        """The source said slow down: pause the lane, widen the spacing. Returns the
+        pause, for the log.
+
+        ``sent_at`` is when the refused request went out. One refusal episode reaches
+        every request already in flight; escalating once per refusal would double the
+        pause six times in a second. A request sent BEFORE the last throttle therefore
+        only honours the current pause — it does not escalate it."""
+        if sent_at is not None and sent_at < self._last_throttle:
+            return max(0.0, self._throttled_until - time.monotonic())
+        self.throttles += 1
+        self._last_throttle = time.monotonic()
+        pause = self._pause
+        self._throttled_until = max(self._throttled_until, time.monotonic() + pause)
+        self._pause = min(self._pause * 2, self.max_pause)
+        self.interval = min(self.interval * 1.5, self.max_interval)
+        self._wins = 0
+        log.warning("pulse_source_throttled", extra={"source": self.name, "pause_s": pause,
+                                                    "interval_s": round(self.interval, 2)})
+        return pause
 
     def done(self, ok: bool) -> None:
         if ok:
             self._fails = 0
+            self._wins += 1
+            if self._wins >= 25:
+                self._wins = 0
+                self._pause = self.pause_base
+                self.interval = max(self.base, self.interval * 0.85)
             return
         self._fails += 1
         if self._fails >= self.trip_after:
-            self._paused_until = time.monotonic() + self.cooldown
+            self._broken_until = time.monotonic() + self.cooldown
             self._fails = 0
             log.warning("pulse_source_paused", extra={"source": self.name,
                                                      "seconds": self.cooldown})
 
 
-# Request spacing per source, in seconds. Google News tolerates a steady trickle and
-# blocks a burst; GDELT publishes its limit (one per 5 s); Bing took the whole live run.
-GOOGLE_INTERVAL_S = 1.5
+# Request spacing per source, in seconds. Google News: 2.5 s measured clean for 150
+# searches in a row from a cloud host (1.5 s was blocked after ~190); it widens itself
+# when throttled. GDELT publishes its limit (one per 5 s) and is not used for bulk.
+GOOGLE_INTERVAL_S = 2.5
 BING_INTERVAL_S = 0.25
 GDELT_INTERVAL_S = 5.5
+# How many times a bulk search retries a throttled source before reporting it. With the
+# pause doubling from 60 s, five retries span ~30 minutes of the source saying "wait".
+THROTTLE_RETRIES = 5
+# The screen sweep asks in batches the browser waits up to 5 minutes for: two retries
+# (pauses of 60 s and 120 s) keep a throttled batch inside that.
+SWEEP_THROTTLE_RETRIES = 2
 
 
 def _skipped(name: str, why: str) -> dict[str, Any]:
@@ -295,19 +355,41 @@ class NewsSearch:
             return resp.text
 
     async def _gated(self, name: str, gated: bool, max_wait: float | None,
-                     call: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-        """Run one source call through its gate (spacing + breaker). ``gated=False``
-        is for the diagnostics probe, which must report the network as it is."""
+                     call: Any, retries: int = 0,
+                     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """Run one source call through its gate. A throttled answer pauses the lane and,
+        for a bulk search (``retries`` > 0), the SAME search is asked again once the
+        pause is over — a digest waits for Google rather than leaving a firm unsearched.
+        ``gated=False`` is for the diagnostics probe, which reports the network as is."""
         gate = self._gates[name]
-        if gated and (why := await gate.enter(max_wait)) is not None:
-            return [], _skipped(name, why)
-        items, status = await call()
-        if gated:
+        for attempt in range(retries + 1):
+            if gated and (why := await gate.enter(max_wait)) is not None:
+                return [], _skipped(name, why)
+            sent_at = time.monotonic()
+            items, status = await call()
+            if not gated:
+                return items, status
+            if status.get("throttled"):
+                gate.throttled(sent_at)
+                if attempt < retries:
+                    continue
+                return items, status
             gate.done(bool(status.get("ok")))
-        return items, status
+            return items, status
+        return [], _skipped(name, "no answer")  # unreachable: the loop always returns
+
+    @staticmethod
+    def _patience(patient: bool, retries: int | None = None) -> tuple[float | None, int]:
+        """(max_wait, retries). A bulk search waits out a throttle and retries — the
+        digest THROTTLE_RETRIES times, the screen sweep fewer (``retries``) so a batch
+        fits the browser's wait; a person at the search box waits 20 s at most."""
+        if not patient:
+            return 20.0, 0
+        return None, THROTTLE_RETRIES if retries is None else retries
 
     async def _google(self, client: httpx.AsyncClient, term: str,
-                      dfrom: str, dto: str, *, gated: bool = True,
+                      dfrom: str, dto: str, *, gated: bool = True, patient: bool = False,
+                      retries: int | None = None,
                       ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         q = term
         if _valid_date(dfrom):
@@ -323,10 +405,12 @@ class NewsSearch:
             except Exception as exc:  # noqa: BLE001 - a best-effort source
                 log.warning("pulse_google_news_failed", extra={"error": str(exc)})
                 return [], _failed("Google News", exc)
-        return await self._gated("Google News", gated, None, call)
+        max_wait, tries = self._patience(patient, retries)
+        return await self._gated("Google News", gated, max_wait, call, retries=tries)
 
     async def _bing(self, client: httpx.AsyncClient, term: str,
-                    dfrom: str, dto: str, *, gated: bool = True,
+                    dfrom: str, dto: str, *, gated: bool = True, patient: bool = False,
+                    retries: int | None = None,
                     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         """Ignores the date range — Bing's RSS has no reliable date filter — but stays
         up when the other two throttle, which is exactly when it earns its place."""
@@ -338,7 +422,8 @@ class NewsSearch:
             except Exception as exc:  # noqa: BLE001
                 log.warning("pulse_bing_news_failed", extra={"error": str(exc)})
                 return [], _failed("Bing News", exc)
-        return await self._gated("Bing News", gated, None, call)
+        max_wait, tries = self._patience(patient, retries)
+        return await self._gated("Bing News", gated, max_wait, call, retries=tries)
 
     async def _gdelt(self, client: httpx.AsyncClient, term: str,
                      dfrom: str, dto: str, query: str = "", *, gated: bool = True,
@@ -390,6 +475,7 @@ class NewsSearch:
     async def _fetch_merge(self, term: str, dfrom: str, dto: str, limit: int,
                            strict: bool = False, context: str = "",
                            names: list[str] | None = None, bulk: bool = False,
+                           retries: int | None = None,
                            ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """``bulk`` (a sweep or a digest — many terms in a row) asks GDELT only when it
         has a free slot rather than queueing every term behind its 5-second limit.
@@ -413,23 +499,26 @@ class NewsSearch:
             queries = [f'"{w}"{ctx}' for i, w in enumerate(wanted)
                        if not any(j != i and low[j] in low[i] and (low[j] != low[i] or j < i)
                                   for j in range(len(wanted)))]
-        phrase = " OR ".join(f'"{n}"' for n in wanted)
-        gq = (f"({phrase})" if len(wanted) > 1 else phrase) + ctx
 
         async def each(fetch: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
             """One source over every query: the items merged, and the source counted as
             searched if any query reached it (else the first failure is its status)."""
-            got = await asyncio.gather(*(fetch(client, q, dfrom, dto) for q in queries))
+            got = await asyncio.gather(*(fetch(client, q, dfrom, dto, patient=bulk or strict,
+                                               retries=retries) for q in queries))
             items = [i for its, _ in got for i in its]
             ok = [st for _, st in got if st.get("ok")]
             status = ({**ok[0], "count": len(items)} if ok else got[0][1])
             return items, status
 
+        async def gdelt_call() -> tuple[list[dict[str, Any]], dict[str, Any]]:
+            # Bulk searches leave GDELT out: at one request per 5 s it covered a quarter
+            # of a digest at best and never added a story Google and Bing lacked.
+            if bulk or strict:
+                return [], {"name": "GDELT", "ok": True, "count": 0, "note": "bulk: not used"}
+            return await self._gdelt(client, term, dfrom, dto, "")
+
         (google, s_google), (gdelt, s_gdelt), (bing, s_bing) = await asyncio.gather(
-            each(self._google),
-            self._gdelt(client, term, dfrom, dto, gq.strip() if strict else "",
-                        max_wait=0.0 if bulk or strict else None),
-            each(self._bing))
+            each(self._google), gdelt_call(), each(self._bing))
         sources = [s_google, s_gdelt, s_bing]
         log.info("pulse_search_sources", extra={"term": term, "google": len(google),
                                                 "gdelt": len(gdelt), "bing": len(bing),
@@ -482,6 +571,7 @@ class NewsSearch:
                             limit: int = 40, live: bool = False, *,
                             strict: bool = False, context: str = "",
                             names: list[str] | None = None, bulk: bool = False,
+                            retries: int | None = None,
                             ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """Articles AND how each source fared.
 
@@ -509,11 +599,13 @@ class NewsSearch:
         self._inflight[key] = fut
         try:
             merged, sources = await self._fetch_merge(term, dfrom, dto, limit,
-                                                      strict, context, names, bulk)
-            # Only a search that actually reached something is worth remembering: cache
-            # a total outage for 15 minutes and the radar stays blind long after the
-            # network comes back.
-            if any(s["ok"] and not s.get("note") for s in sources):
+                                                      strict, context, names, bulk, retries)
+            # Only a COMPLETE answer is worth remembering. Cache a total outage and the
+            # radar stays blind long after the network is back; cache a partial one
+            # (Google throttled, Bing fine) and a digest's retry pass gets the same gap
+            # back from the cache instead of asking Google again. GDELT is optional.
+            core_failed = any(not s["ok"] for s in sources if s["name"] != "GDELT")
+            if not core_failed and any(s["ok"] and not s.get("note") for s in sources):
                 self._cache[key] = (time.time(), merged, sources)
                 self._cache.move_to_end(key)
                 while len(self._cache) > self.cache_max:
@@ -561,7 +653,8 @@ class NewsSearch:
                 try:
                     articles, sources = await self.search_detail(
                         term, dfrom, dto, limit, term in live, strict=strict,
-                        names=watch_names(term) if strict else None, bulk=True)
+                        names=watch_names(term) if strict else None, bulk=True,
+                        retries=SWEEP_THROTTLE_RETRIES)
                 except Exception as exc:  # noqa: BLE001 — one bad term never ends a sweep
                     log.warning("pulse_sweep_term_failed",
                                 extra={"term": term, "error": str(exc)})

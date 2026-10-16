@@ -6,6 +6,220 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **The news digest searches every firm: a source that says "slow down" is waited for,
+  not reported missing.** The 14 Oct production digest said "Google News could not be
+  searched for 335 of 525 firms (HTTP 503)". Measured from cipher-test: the 503 is
+  Google's response to request RATE, not a ban — 150 searches 2.5 s apart and 400
+  searches 2.0 s apart all answered 200; 1.5 s was blocked after ~190.
+  * *Throttle = wait and retry.* A 503 or 429 pauses that source's lane (60 s, doubling
+    to 15 min), widens its spacing (x1.5) and asks the SAME search again, up to 5 times
+    for a bulk run; 25 clean answers in a row ease the spacing back. Google's base
+    spacing is 2.5 s. A person at the search box is never held more than 20 s.
+  * *No firm left behind.* Firms whose search still had a gap are searched again in up
+    to two more passes before the email goes out; a partial answer is no longer cached,
+    so a retry really asks again. The "could not be searched" notice now appears only
+    for what is still missing after all of that.
+  * *On time.* Careful pacing makes a 500-firm run ~20-25 minutes, so the scheduler
+    starts the search early — the slowest of the last three runs plus a quarter and five
+    minutes (20 min with no history) — and holds the email for its slot. A retry after
+    a failed send keeps its own short delay.
+  * *GDELT is left out of bulk runs* (one request per 5 s; it never added a story).
+  * *"Run now" runs in the background.* An all-firms digest at this pace is ~20 min;
+    held in the request it met the edge's 65 s limit. It now answers "Running in the
+    background", refuses a second click while running, and the outcome — including
+    "all N firms searched on every source" — is the schedule's Last run.
+  * *Nothing goes out during a pause.* A request that already held a slot when the
+    throttle landed waits the pause out (live: such requests went out anyway and doubled
+    the pause from 60 s to 15 min in under three minutes). Retry passes stop once a run
+    has searched for 45 minutes, so a source that is down for the morning is reported,
+    not chased for hours.
+  * *Email that is not configured is not retried.* The retry loop re-ran the whole
+    all-firms search three more times for it (cipher-test, 15 Oct: four Google sweeps in
+    40 minutes); it is now recorded once as "not retried: fix the setting first".
+  * *The screen sweep* retries a throttle twice (not five times) and goes in batches of
+    20, so a throttled batch stays inside the browser's 5-minute wait.
+  *Operator:* none. The first run after the upgrade starts 20 minutes early; later
+  ones learn their lead from history.
+
+- **The news digest asks each source no faster than it allows, and the email says when
+  a source could not be searched.** A live all-firms run (489 firms, 13 Oct, from a dev
+  machine) had Google News answer its automated-traffic block (HTTP 503) for 365 firms
+  and GDELT refuse 389 ("one request every 5 seconds"); it took 25 minutes and its
+  email looked complete.
+  * *Pacing (`SourceGate`).* Google News one request per 1.5 s, Bing per 0.25 s, GDELT
+    per 5.5 s, whatever the concurrency above. A bulk search (the digest, the sweep)
+    asks GDELT only when it has a free slot; GDELT's quick retry on a 429 is gone. A
+    source that fails 4 times in a row is paused for 10 minutes and reported as not
+    searched, not hammered. Simulated with the real spacing: about 1.5 s per firm,
+    ~12 minutes for 489 firms, GDELT asked for about one firm in four. The diagnostics
+    probe is not paced.
+  * *Coverage in the email.* The digest states how many firms were searched and, per
+    source, for how many it could not be searched and why ("Google News could not be
+    searched for 365 of 489 firms (HTTP 503)… may be missing news about them"). It is
+    sent even when nothing was found, so "nothing new" with a source down reads as
+    such. The run's history note names the sources too.
+  * *Short names.* Surnames ("Datta" matched Justice Datta), business houses ("Adani"
+    pulled in Adani Group news) and a reviewed list of namesakes, given names and
+    common words (Orano, Terex, Freyr, Praveen, Vidyut…) are never automatic short
+    names; 96 of the register's 489 firms get one.
+  * *No OR queries.* Bing answers zero results to a query containing OR (live: '"Enerparc
+    Energy" OR "Enerparc"' gave 0 items, '"Enerparc"' gave 14), which left every firm
+    with a short name blind on Bing. Each name is now its own query, and a name that
+    contains another (the full name contains its short name) is not asked separately.
+  * *"Found as".* An article matched on a name other than the card's (the automatic
+    short name, or an analyst's news name) says so beside its source, so a namesake is
+    read as one: the cipher-test live run matched "NSure" to nSure.ai and "Srichakra"
+    to TVS Srichakra.
+  * *Packaging.* The word list is declared package data. An installed copy of PULSE
+    (anything not run from the source tree) had an empty list, and with it no short
+    names; the service itself, run from `/app`, was not affected.
+  *Operator:* none (no new settings).
+
+- **The news digest watches each company's directors and promoters, keeps only news
+  that names the firm or the person, and runs in parallel.**
+  * *Key people on the company.* The client master gains **Key people · watched in the
+    news** (company drawer): name, role and an optional city for each director or
+    promoter. Stored on the entity as `key_people` (`[{name, role, city}]`, up to 20; a
+    row without a name is refused). The scheduled all-firms digest searches each listed
+    person with the firm, and a hit appears on the firm's card under the person's name
+    ("Director · …"). People are watched only where an analyst has listed them.
+  * *Names are searched as names.* A firm or person is now searched in quotes (a person
+    with their city), and an article is kept only if its headline or snippet prints the
+    name as whole words, dated inside the window or up to a week before it. This removes
+    the bus shootings under "Atlanta System", the cricket under "Chennai Test" and the
+    2015–2016 stories Bing returned every week. It applies to the scheduled digest and the
+    all-firms sweep (`/v1/news/sweep`, `strict` defaults to true); the free-text search
+    box is unchanged.
+  * *Faster.* The scheduled run searched one firm at a time; it now keeps six searches
+    in flight (bounded again by the search engine's upstream pool), with the firm's
+    people searched alongside it.
+  * *The email.* One masthead per email instead of one per firm; each firm is a card led
+    by its name in large type, ordered most serious first, with a contents line at the
+    top, readable dates, and an "older story" tag for a resurfaced article.
+  * *Short names and news names.* "Enerparc insolvency" never prints "Enerparc Energy",
+    so a firm is also searched under one automatic short name: the trading name without
+    its generic words (Energy, Electric Auto, Group…), taken only if what is left is a
+    single word of five letters or more that is neither English (SCOWL word list,
+    shipped with PULSE) nor a common Indian place or given name. "Enerparc", "Saera",
+    "Pashupati" pass; "Future", "Capital", "Atlanta", "Rajasthan" do not. An analyst can
+    set the names instead (**Searched in the news as**, `entities.news_aliases`); when
+    set they are the whole list, so a firm named after a word can be watched under a
+    fuller name.
+  * *Leave out of the digest.* `entities.news_watch = false` (a checkbox in the drawer)
+    drops placeholders, test rows, places and people entered as firms, even if a
+    schedule's stored snapshot names them.
+  * *Each story once, and never sent twice.* Headlines that share two content words
+    are one story: the most serious, newest one leads and the other reports are listed
+    small beneath it. Two records carrying the same stories become one card ("Euroteck ·
+    Euroteck Environmental"). A schedule remembers what it sent (90 days, 5,000 stories)
+    and sends only what is new (`only_new`, default on); only a successful send is
+    remembered.
+  * *Smaller fixes.* Bing items name their real publisher and link straight to the
+    article, not Bing's click-tracker. The contents line links to each card and each
+    card back to the top (Outlook, Apple Mail and phone clients; Gmail on the web
+    ignores in-email links). The subject leads with the most serious firms. Severity no
+    longer reads "fraud prevention", a military strike or "does not amount to fraud" as
+    adverse.
+  * *Measured on the 13 Oct digest* (93 articles transcribed and replayed): 56 firms /
+    93 articles become 7 firms / 11 reports / 8 stories, with 6 of the 8 genuine current
+    items kept (the other two: a story from before the window, and a headline that
+    never names the firm). The remaining noise is four firms named after ordinary words,
+    which is what the news names and the opt-out are for.
+  *Operator:* Register migration `0030` (adds `entities.key_people`, `news_aliases`,
+  `news_watch`; runs with the normal upgrade, after develop's `0025`–`0029`). No new
+  settings. The first digest after the upgrade has no memory yet, so it sends
+  everything in its window once. **cipher-test only:** it ran this migration as `0025`
+  before the branches merged, so its `alembic_version` reads `0025` while develop's
+  `0025` (lead enquiries) never ran. Before deploying the merged branch there, set it
+  back: `UPDATE alembic_version SET version_num = '0024';` — the upgrade then runs
+  `0025`–`0029` and `0030` is a no-op (`IF NOT EXISTS`).
+
+- **The CAM's Word export opens with a cover page led by the borrower.** The title
+  block used to print as body text under the file title, with the lender's name above
+  the borrower's. Now page 1 shows: the borrower in large navy capitals, its constitution
+  and location, the proposed facility and key terms, a grid of dates and preparer, and
+  the lender small at the foot. The body starts on page 2. Only drafts that open with the
+  CAM title block are affected; other exports render as before.
+  *Operator:* none.
+
+- **CAM and risk grade read HTML documents as text, not markup.** CIBIL consumer reports
+  (CIRs) are saved HTML pages: about 800 KB of styles and inline images around 10–50 KB of
+  text. They used to be read raw, so the per-document limit cut them off before the
+  score; uploaded without a type, they were skipped. Now `extract_text` (shared by the
+  CAM and the risk grade) recognises HTML by its type or its first bytes, drops scripts,
+  styles and images, and keeps each table row on one line. On a real borrower's four CIRs
+  the CAM now quotes all four partner scores, and the risk grade's CIBIL reader picks
+  up score, worst DPD and its recency (it read nothing from HTML before).
+  *Operator:* none. Reports uploaded earlier are read correctly on the next draft or grade.
+
+- **The risk report is rebuilt around what a credit reader needs, and PRISM reads the
+  hard facts itself.**
+  * *Order of the report:* verdict, then what the grade stands on (evidence read per area),
+    red flags with their source, key figures, hard triggers, risks and mitigants, conditions,
+    documents to request. The seven-pillar scoring moves to an appendix. The same order
+    applies on screen (Company 360 → Risk report) and in the Word report.
+  * *Facts read by PRISM, not the model (`risk_facts.py`).* These come from each file's full
+    text, before any clipping:
+    - bank-statement analyses: limit, days over-drawn, peak, payments returned for
+      insufficient funds;
+    - CIBIL consumer reports: CIBIL score, other scores, worst DPD and its recency;
+    - commercial CMR rank, litigation counts, and the CMA grid by year.
+
+    They become flags and key figures, and are given to the grader as verified facts.
+    A file whose layout is not recognised gives no fact; nothing is guessed.
+  * *Zips are opened.* Each file inside is read and listed on its own
+    ("Bank Statements.zip / BOI Apr–Jun.pdf"), using the DocRAG indexer's guarded unpacker.
+    Previously every zip was "SKIPPED — no extractor".
+  * *Bureau and KYC are read.* `WORKFLOWS_RISK_GRADE_DOC_SECTIONS` now defaults to Financials,
+    Banking & Debt, Compliance & Bureau, KYC & Constitutional, and the text budget to 280k.
+    Aadhaar- and PAN-shaped numbers are masked before any text leaves PRISM.
+  * *Honest triggers.* The grader now applies three rules:
+    - A trigger PRISM verified in a file is a Hit.
+    - A "Clear" resting only on a file that was not read is Unknown, shown as "Unverified".
+      A file name is not evidence.
+    - The consumer-score trigger is decided on the CIBIL (CreditVision) score. Grameen and
+      other scores below 650 are amber flags for a desk ruling.
+
+    The trigger check also ignores negated mentions ("No NPA/SMA-2").
+  * *Banking evidence:* a BSA report now counts as banking evidence. It did not before, and
+    pillar B was dropped as "no data".
+
+  Operator steps: none; the new defaults apply on restart. Saved grades from before render
+  without the new sections until regraded.
+
+- **The evidence check on hard triggers now fires on real model output, and never
+  cancels a genuine RED.** The first version matched the trigger name `score < 650` exactly,
+  so the live reading that prompted it (`score <650`, no space) went straight through.
+  It also had three opposite failures:
+  * It would have cancelled a real SMA-2 or NPA hit. The rubric's STEP 1 bundles those with
+    the numeric clauses in one trigger, so promoter scores above 650 could clear an SMA-2.
+  * It read a restated threshold ("below 650") as a score that disproves it.
+  * It read rupee amounts as bureau scores.
+
+  Trigger names are now matched with spacing ignored. A Hit is set aside only when every
+  numeric clause the trigger names is disproved by the figures it cites and the evidence
+  names none of the non-numeric conditions. Scores are read only next to "CIBIL",
+  "bureau" or "score"; ₹ amounts and the threshold itself are ignored.
+- **Market validation and engagement need an ATLAS record behind them.** Pillar C (lender
+  outcomes, Asset Monetisation) and pillar F (last touch, contacts, interactions) now
+  have no data when the panorama holds nothing for them, whatever a reading says. Readings
+  were scoring C from purchase orders, which is D's evidence counted twice. The rule is
+  applied to every reading, so the per-run scores and their spread match the grade shown.
+  The rubric still decides everything else. No operator steps.
+
+- **A hard trigger must agree with its own evidence before it forces RED.** A trigger
+  that names a numeric threshold (consumer bureau score below 650, commercial rank
+  8–10) is now checked against the figures its evidence cites; where they disprove it,
+  the trigger is recorded as `Unknown` instead of overriding the band, and
+  `adjustments` says so. Found in the field: the bureau trigger fired on promoter
+  scores of 775/777/820/870 — none below 650 — which would have told a committee
+  something untrue about a promoter's record. The real finding there (a delinquency
+  flag) belongs to pillar B, which already scores it. A trigger whose evidence cites
+  no figures is left to the majority-of-readings rule as before, since no number means
+  "cannot verify", not "disproved". A trigger-driven RED is also labelled PROVISIONAL
+  when Financials or Banking are missing: the colour is firm, the reasoning is not.
+  No operator steps.
+
 - **The risk grade reads the company's own files, asks PULSE, and gives a report.**
   * *Data Register, the CAM way:* the orchestrator reads the company's files in
     Financials and Banking & Debt (`WORKFLOWS_RISK_GRADE_DOC_SECTIONS`) as the caller,

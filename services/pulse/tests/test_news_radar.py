@@ -221,6 +221,16 @@ async def test_one_dead_source_never_fails_the_search(monkeypatch):
     assert {a["via"] for a in arts} == {"Bing News"}
 
 
+def _feeds_ok(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=GOOGLE_RSS if "google" in request.url.host
+                              else BING_RSS)
+
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr("app.news.search.httpx.AsyncClient",
+                        lambda *a, **k: _REAL_ASYNC_CLIENT(*a, **{**k, "transport": transport}))
+
+
 def _all_upstreams_dead(monkeypatch, exc=None):
     def handler(request: httpx.Request) -> httpx.Response:
         raise exc or httpx.ConnectError("[Errno -3] Temporary failure in name resolution")
@@ -460,6 +470,38 @@ def test_the_hour_is_the_desks_hour_not_the_containers(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_email_that_is_not_configured_is_not_retried(tmp_path):
+    """No retry can configure SMTP: the old loop re-ran the whole all-firms search three
+    more times for it, four Google sweeps in 40 minutes, every morning."""
+    store = sched.ScheduleStore(str(tmp_path / "s.json"))
+    calls = []
+
+    async def runner(s, **kw):
+        calls.append(s["id"])
+        return False, "Email is not configured — set PULSE_SMTP_HOST", 3, 0
+
+    task = asyncio.create_task(sched.scheduler_loop(store, runner, tick_seconds=0))
+    await asyncio.sleep(0.02)
+    store.add({"id": "S1", "tenant": "EVAM", "q": "Acme", "recipients": ["a@b.com"],
+               "cadence": "daily", "hour": 8, "weekday": 0,
+               "next_run": time_mod.time() - 5, "active": True})
+    try:
+        while not calls:
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(0.1)
+        s1 = store.get("S1")
+        assert calls == ["S1"] and not s1.get("retry")
+        # The next REGULAR slot, not a retry delay. Compared with the slot itself rather
+        # than "more than an hour away": run between 07:00 and 08:00 IST, the 8 o'clock
+        # slot is less than an hour off and the looser check failed on the clock alone.
+        assert abs(s1["next_run"] - sched.next_run("daily", 8, 0)) < 5, "next regular slot, not minutes"
+        assert s1["next_run"] > time_mod.time() + 60
+        assert "not retried" in s1["history"][-1]["note"]
+    finally:
+        task.cancel()
+
+
+@pytest.mark.asyncio
 async def test_a_failed_send_is_retried_soon_not_lost_until_tomorrow(tmp_path):
     """One SMTP hiccup at 7:00 must not silently cost the desk the whole day's digest:
     the loop re-arms the schedule minutes out, a bounded number of times, and writes
@@ -467,7 +509,7 @@ async def test_a_failed_send_is_retried_soon_not_lost_until_tomorrow(tmp_path):
     store = sched.ScheduleStore(str(tmp_path / "s.json"))
     calls = []
 
-    async def runner(s):
+    async def runner(s, **kw):
         calls.append(s["id"])
         if len(calls) < 2:
             return False, "Send failed: smtp timeout", 0, 0
@@ -683,7 +725,7 @@ async def test_strict_search_quotes_the_name_and_drops_what_does_not_name_it(mon
     engine = NewsSearch(disable_gdelt=True)
     asked = []
 
-    async def fake_rss(client, q, dfrom, dto):
+    async def fake_rss(client, q, dfrom, dto, **kw):
         asked.append(q)
         return ([{"title": "Atlanta System wins grid order", "url": "https://a/1",
                   "source": "ET", "when": "20261010", "via": "Google News"},
@@ -875,7 +917,7 @@ async def test_a_firm_is_never_searched_with_or_because_bing_answers_it_with_not
     engine = NewsSearch(disable_gdelt=True, pace=False)
     asked = []
 
-    async def fake(client, q, dfrom, dto):
+    async def fake(client, q, dfrom, dto, **kw):
         asked.append(q)
         return ([{"title": "Enerparc insolvency administrator targets sale", "url": "https://e/1",
                   "source": "PV", "when": "20261007", "via": "Bing News"}],
@@ -911,6 +953,206 @@ def test_the_word_list_ships_inside_the_package_not_only_in_the_source_tree():
     conf = tomllib.loads((Path(__file__).parents[1] / "pyproject.toml").read_text())
     assert "data/*" in conf["tool"]["setuptools"]["package-data"]["app.news"]
     assert len(names._english()) > 50000
+
+
+@pytest.mark.asyncio
+async def test_a_throttled_source_is_waited_out_and_asked_again_not_given_up(monkeypatch):
+    """The 14 Oct production digest: "Google News could not be searched for 335 of 525
+    firms (HTTP 503)". A 503 now pauses Google's lane and the SAME search is retried,
+    so the firm is searched, not reported missing."""
+    from app.news import search as srch
+    engine = NewsSearch(disable_gdelt=True, pace=False)
+    engine._gates["Google News"] = srch.SourceGate("Google News", 0.0, pause=0.02,
+                                                   max_pause=0.05)
+    answers = iter([503, 503, 200])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "news.google.com" in request.url.host:
+            code = next(answers)
+            return (httpx.Response(200, text=GOOGLE_RSS) if code == 200
+                    else httpx.Response(code, text="<html>Sorry...</html>"))
+        return httpx.Response(200, text=BING_RSS)
+
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr("app.news.search.httpx.AsyncClient",
+                        lambda *a, **k: _REAL_ASYNC_CLIENT(*a, **{**k, "transport": transport}))
+    arts, sources = await engine.search_detail("Acme Solar", "2026-08-01", "2026-08-10",
+                                               strict=True, names=["Acme Solar"])
+    google = next(x for x in sources if x["name"] == "Google News")
+    assert google["ok"] is True, "searched after two throttles, not given up"
+    assert engine._gates["Google News"].throttles == 2
+    assert any(a["via"] == "Google News" for a in arts)
+
+
+@pytest.mark.asyncio
+async def test_a_person_at_the_search_box_is_not_held_through_a_long_throttle(monkeypatch):
+    from app.news import search as srch
+    engine = NewsSearch(disable_gdelt=True, pace=False)
+    gate = srch.SourceGate("Google News", 0.0, pause=600)
+    engine._gates["Google News"] = gate
+    gate.throttled()                                   # Google said "wait 10 minutes"
+    _feeds_ok(monkeypatch)
+    t0 = time_mod.monotonic()
+    _, sources = await engine.search_detail("Acme Solar")
+    assert time_mod.monotonic() - t0 < 5, "an interactive search does not sit it out"
+    google = next(x for x in sources if x["name"] == "Google News")
+    assert google.get("skipped") and "too fast" in google["error"]
+
+
+@pytest.mark.asyncio
+async def test_a_request_queued_before_a_throttle_does_not_go_out_during_the_pause():
+    """Live on cipher-test: callers that already held a slot sent anyway while Google's
+    pause was on, and each refusal doubled the pause. They now wait the pause out."""
+    from app.news.search import SourceGate
+    gate = SourceGate("Google News", 0.05, pause=0.3, max_pause=1.0)
+    t0 = time_mod.monotonic()
+    first = await gate.enter()                       # takes the first slot now
+    waiting = asyncio.create_task(gate.enter())       # holds the next slot (t0 + 0.05)
+    await asyncio.sleep(0.01)
+    gate.throttled(time_mod.monotonic())              # Google says stop, before slot 2
+    assert first is None and await waiting is None
+    assert time_mod.monotonic() - t0 >= 0.3, "slot 2 waited for the pause, not just its turn"
+
+
+@pytest.mark.asyncio
+async def test_retry_passes_stop_when_the_run_has_spent_its_budget(monkeypatch):
+    monkeypatch.setattr(sched, "RETRY_PASS_BUDGET_S", -1)     # budget already spent
+    calls = []
+
+    async def search(term, dfrom, dto, **kw):
+        calls.append(term)
+        return ([], [{"name": "Google News", "ok": False, "error": "HTTP 503",
+                      "throttled": True}, {"name": "Bing News", "ok": True}])
+
+    sent = {}
+    ok, msg, _, _ = await sched.run_schedule(
+        {"id": "S1", "q": "Acme Solar", "recipients": ["a@b.com"]},
+        search=search, send=lambda to, subj, body: (sent.update(body=body) or True, "sent"),
+        digest=lambda groups, dfrom, dto, **k: __import__(
+            "app.news.mailer", fromlist=["digest_page"]).digest_page(groups, dfrom, dto, **k))
+    assert calls == ["Acme Solar"], "no retry pass after the budget"
+    assert "Google News for 1 of 1 firms" in msg and "could not be searched" in sent["body"]
+
+
+def test_the_gate_slows_on_a_throttle_and_eases_back_after_a_clean_run():
+    from app.news.search import SourceGate
+    gate = SourceGate("Google News", 2.0, pause=60, max_pause=900)
+    assert gate.throttled() == 60 and gate.interval == 3.0
+    assert gate.throttled() == 120 and gate.interval == 4.5
+    for _ in range(25):
+        gate.done(True)
+    assert gate.interval < 4.5 and gate._pause == 60, "eases back, pause step resets"
+    for _ in range(200):
+        gate.done(True)
+    assert gate.interval == 2.0, "never below the measured base"
+
+
+def test_one_refusal_episode_escalates_the_pause_once_not_once_per_request_in_flight():
+    """Six requests in flight when Google starts refusing used to double the pause six
+    times (60 s -> 15 min in a second). Requests sent before the throttle only honour
+    it; the next refusal of a request sent AFTER it is what escalates."""
+    from app.news.search import SourceGate
+    gate = SourceGate("Google News", 2.0, pause=60, max_pause=900)
+    t_sent = time_mod.monotonic()
+    assert gate.throttled(t_sent) == 60
+    for _ in range(5):                      # the rest of the burst, sent at the same time
+        gate.throttled(t_sent)
+    assert gate.throttles == 1 and gate._pause == 120
+    assert gate.throttled(time_mod.monotonic() + 1) == 120, "a later refusal escalates"
+
+
+@pytest.mark.asyncio
+async def test_a_partial_answer_is_not_cached_so_a_retry_really_asks_again(monkeypatch):
+    calls = {"google": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "news.google.com" in request.url.host:
+            calls["google"] += 1
+            if calls["google"] == 1:
+                raise httpx.ConnectTimeout("blip")
+            return httpx.Response(200, text=GOOGLE_RSS)
+        return httpx.Response(200, text=BING_RSS)
+
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr("app.news.search.httpx.AsyncClient",
+                        lambda *a, **k: _REAL_ASYNC_CLIENT(*a, **{**k, "transport": transport}))
+    engine = NewsSearch(disable_gdelt=True, pace=False)
+    _, first = await engine.search_detail("Acme Solar")
+    _, second = await engine.search_detail("Acme Solar")
+    assert not next(x for x in first if x["name"] == "Google News")["ok"]
+    assert next(x for x in second if x["name"] == "Google News")["ok"], \
+        "the gap was not served back from the cache"
+    _, third = await engine.search_detail("Acme Solar")
+    assert calls["google"] == 2, "a complete answer IS cached"
+
+
+@pytest.mark.asyncio
+async def test_bulk_searches_leave_gdelt_out_entirely(monkeypatch):
+    asked = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        asked.append(request.url.host)
+        return httpx.Response(200, text=GOOGLE_RSS if "google" in request.url.host
+                              else BING_RSS)
+
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr("app.news.search.httpx.AsyncClient",
+                        lambda *a, **k: _REAL_ASYNC_CLIENT(*a, **{**k, "transport": transport}))
+    _, sources = await NewsSearch(pace=False).search_detail(
+        "Acme Solar", strict=True, names=["Acme Solar"])
+    assert not any("gdelt" in h for h in asked)
+    assert all(x["ok"] for x in sources), "nothing to report about GDELT in a digest"
+
+
+@pytest.mark.asyncio
+async def test_no_firm_is_left_unsearched_when_a_source_has_a_bad_minute():
+    """THE ACCEPTANCE TEST for "test such that nothing fails": Google throttles a third
+    of the firms on the first pass. The retry passes search them again, every firm ends
+    up searched on every source, and the email carries no "could not be searched"."""
+    first_time: set[str] = set()
+
+    async def search(term, dfrom, dto, **kw):
+        flaky = term.endswith(("0", "3", "6"))
+        google_ok = not (flaky and term not in first_time)
+        first_time.add(term)
+        return ([{"title": f"{term} fined by regulator", "url": f"u/{term}",
+                  "severity": "BAD"}],
+                [{"name": "Google News", "ok": google_ok,
+                  **({} if google_ok else {"error": "HTTP 503 from the source",
+                                           "throttled": True})},
+                 {"name": "GDELT", "ok": True, "count": 0, "note": "bulk: not used"},
+                 {"name": "Bing News", "ok": True}])
+
+    sent = {}
+    names = [f"Firm {i}" for i in range(30)]
+    ok, msg, firms, _ = await sched.run_schedule(
+        {"id": "S1", "q": ",".join(names), "recipients": ["a@b.com"]},
+        search=search, send=lambda to, subj, body: (sent.update(body=body) or True, "sent"),
+        digest=lambda groups, dfrom, dto, **k: __import__(
+            "app.news.mailer", fromlist=["digest_page"]).digest_page(groups, dfrom, dto, **k))
+    assert ok and firms == 30
+    assert "not searched" not in msg
+    assert "could not be searched" not in sent["body"]
+    assert "30 firms searched" in sent["body"]
+
+
+@pytest.mark.asyncio
+async def test_a_digest_is_searched_early_and_sent_at_its_minute():
+    sent_at = []
+    t0 = time_mod.time()
+    await sched.run_schedule(
+        {"id": "S1", "q": "Acme Solar", "recipients": ["a@b.com"]},
+        search=lambda *a, **k: asyncio.sleep(0, result=[]),
+        send=lambda *a: (sent_at.append(time_mod.time()) or True, "sent"),
+        digest=lambda *a, **k: "", send_at=t0 + 0.3)
+    assert sent_at and sent_at[0] >= t0 + 0.3, "held until the slot"
+
+
+def test_the_lead_time_is_learnt_from_how_long_the_last_searches_took():
+    assert sched.lead_seconds({}) == sched.DEFAULT_LEAD_S
+    s = {"history": [{"seconds": 900}, {"seconds": 1500}, {"seconds": 1200}]}
+    assert sched.lead_seconds(s) == 1500 * 1.25 + 300
+    assert sched.lead_seconds({"history": [{"seconds": 99999}]}) == sched.MAX_LEAD_S
 
 
 def test_trading_name_sheds_the_suffixes_the_press_never_prints():
@@ -1001,6 +1243,37 @@ def test_a_schedule_needs_a_term_and_a_recipient(client):
 def test_running_an_unknown_schedule_says_so(client):
     r = client.post("/v1/news/schedules/run", json={"id": "nope"})
     assert r.status_code == 404
+
+
+def test_run_now_answers_at_once_and_the_outcome_lands_under_last_run(client, monkeypatch):
+    """"Run now" on an all-firms digest takes ~20 minutes at a pace Google accepts; held
+    in the request it met the edge's 65 s limit. It starts in the background, a second
+    click while it runs is refused, and the result is the schedule's last history entry."""
+    gate = asyncio.Event()
+    from app import main as main_mod
+
+    async def slow_run(schedule, **kw):
+        await gate.wait()
+        return False, "Email is not configured — all 2 firms searched on every source", 2, 3
+
+    monkeypatch.setattr(main_mod.sched, "run_schedule", slow_run)
+    made = client.post("/v1/news/schedules", json={
+        "q": "Acme Solar, Beta Wind", "recipients": "desk@evamfinance.com"}).json()["schedule"]
+    t0 = time_mod.monotonic()
+    r = client.post("/v1/news/schedules/run", json={"id": made["id"]})
+    assert r.status_code == 202 and r.json()["started"] is True
+    assert time_mod.monotonic() - t0 < 2, "answered without waiting for the run"
+    again = client.post("/v1/news/schedules/run", json={"id": made["id"]})
+    assert again.status_code == 409, "no second run while one is going"
+    client.portal.call(gate.set)            # let the run finish on the app's own loop
+    for _ in range(100):
+        hist = client.get("/v1/news/schedules").json()["schedules"][0].get("history") or []
+        if hist:
+            break
+        time_mod.sleep(0.02)
+    assert hist[-1]["ok"] is False and "all 2 firms searched" in hist[-1]["note"]
+    assert client.post("/v1/news/schedules/run", json={"id": made["id"]}).status_code == 202, \
+        "free to run again once it finished"
 
 
 def test_the_desk_edits_a_schedule_in_place(client):

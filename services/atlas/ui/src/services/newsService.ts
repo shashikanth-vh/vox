@@ -519,7 +519,9 @@ export const newsService = {
        count that advances every few seconds, articles that appear on screen while the
        rest is still running, and a request short enough that no single failure throws
        away the whole sweep. */
-    const BATCH = 40;
+    // Twenty, not forty: Google is asked no faster than every 2.5 s and a throttled batch
+    // waits out up to two pauses (60 s + 120 s) — still inside the 5-minute wait below.
+    const BATCH = 20;
     const live = new Set(liveTerms);
     let found = 0, failTerms = 0, done = 0;
     for (let i = 0; i < terms.length; i += BATCH) {
@@ -527,7 +529,7 @@ export const newsService = {
       const r = await fetch(PULSE_URL + '/v1/news/sweep', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...pulseHeaders() },
-        // A batch of forty across three sources is a minute or two at worst.
+        // A batch of twenty is ~50 s at Google's pace, under four minutes if throttled.
         signal: typeof AbortSignal !== 'undefined' && AbortSignal.timeout
           ? AbortSignal.timeout(300_000) : undefined,
         body: JSON.stringify({ terms: slice,
