@@ -92,3 +92,14 @@ async def register_direct() -> AsyncIterator[httpx.AsyncClient]:
         headers={"X-API-Key": "test-key", "X-Tenant": "EVAM"},
     ) as client:
         yield client
+
+
+@pytest.fixture(autouse=True)
+def _no_source_spacing(monkeypatch):
+    """The real per-source spacing (Google every 9 s) is what production needs and what
+    no test of OTHER behaviour should sit through. Tests of the spacing itself build
+    their own SourceGate with explicit intervals."""
+    from app.news import search
+    monkeypatch.setattr(search, "GOOGLE_INTERVAL_S", 0.0)
+    monkeypatch.setattr(search, "BING_INTERVAL_S", 0.0)
+    monkeypatch.setattr(search, "GDELT_INTERVAL_S", 0.0)

@@ -113,9 +113,36 @@ def _distinctive(word: str) -> bool:
             and w not in _TAKEN)
 
 
+def too_common(name: str) -> bool:
+    """A name that is one ordinary word — "Land", "Pure", "Vikas" — names everything
+    and so finds nothing about the firm. Three register firms are called exactly that;
+    searched, they filed 47 of the first 50 adverse stories on cipher-test (land-fraud
+    cases, an IAS officer called Vikas). Such a firm is searchable only under the news
+    names an analyst sets. The English list holds words of five letters or more, so a
+    shorter word counts as common unless it is written as an acronym ("IPEC") or is
+    plainly coined — a digit or a non-English letter ("3eco", "Savë")."""
+    tokens = re.findall(r"[\w&']+", name or "")
+    if len(tokens) != 1:
+        return False
+    raw = tokens[0]
+    w = raw.lower()
+    if len(w) < 5:
+        coined = raw.isupper() or not (raw.isalpha() and raw.isascii())
+        return len(w) < 3 or not coined
+    return w in _english() or w in _INDIA_COMMON or w in _SURNAMES or w in _GROUP_HOUSES
+
+
+# A GROUP is searched whole. "Pashupati Group" shortened to "Pashupati" found a temple in
+# Kathmandu and an unrelated listed company (cipher-test, 16 Oct): the word in front of
+# "Group" is a family, a deity or a place far more often than a brand.
+_KEEP_WHOLE = frozenset({"group", "groups"})
+
+
 def short_name(trading: str) -> str | None:
     """The one automatic short name for a firm, or None when there is no safe one."""
     tokens = re.findall(r"[A-Za-z0-9&']+", trading or "")
+    if any(t.lower() in _KEEP_WHOLE for t in tokens):
+        return None
     core = list(tokens)
     while len(core) > 1 and core[-1].lower() in GENERIC:
         core.pop()

@@ -11,8 +11,11 @@ from __future__ import annotations
 import json
 from functools import lru_cache
 
+from evam_backend_core.logging import get_logger
 from pydantic import ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+log = get_logger("pulse.config")
 
 
 class Settings(BaseSettings):
@@ -92,6 +95,38 @@ class Settings(BaseSettings):
     scheduler_enabled: bool = True
     scheduler_tick_s: int = 60
 
+    # ---- News Radar: the monitor (app/news/monitor.py) ----------------------
+    # Searches the book a slice an hour, overnight, and files what it finds in the
+    # Register; the all-firms digest then reads those findings instead of searching.
+    # Off = the old behaviour: the digest searches everything before it sends.
+    monitor_enabled: bool = True
+    monitor_file: str = "/data/pulse/monitor.json"
+    # Tenants the monitor covers (comma-separated); blank = PULSE_REGISTER_TENANT.
+    monitor_tenants: str = ""
+    # Google searches the monitor may spend an hour. Google allows a cloud host ~450;
+    # the rest is left for the desk's own searches.
+    monitor_google_per_hour: int = 300
+    # When the hourly batches may start, on the desk's clock (PULSE_DIGEST_TZ): START-END,
+    # wrapping midnight if START > END ("22-5"); blank or "all" = all day. The default
+    # leaves the day's Google allowance to the desk and ends an hour before a 7 AM digest.
+    monitor_hours: str = "0-6"
+    # A firm is searched again once its last complete search is this old. 20 h with a
+    # night window: every firm once a night, never twice in one.
+    monitor_refresh_hours: float = 20.0
+    # How far back a firm's FIRST search looks (later ones start from the last).
+    monitor_window_days: int = 30
+    # One more Google search per firm: its names with the adverse words, so a large
+    # firm's raid is not story 140 behind its results.
+    monitor_adverse_query: bool = True
+    # Official sources, read once per batch for the whole book.
+    official_sebi: bool = True
+    official_ibbi: bool = True
+    official_nse: bool = True              # listed firms' adverse filings
+    ibbi_pages: int = 3                    # newest 3 pages (~60 announcements) an hour
+    ibbi_history_pages: int = 100          # read once a day, and on a history pass: ~2,000
+    # "📜 12-month history": how far back that pass searches the news for every firm.
+    monitor_history_days: int = 365
+
     # A hand-edited .env picks up stray punctuation — a trailing comma from a copied
     # block, a stray quote. On a NUMBER or a BOOLEAN that is unambiguously a typo: no
     # port is "587," and no flag is "1,". Cleaning it beats a container that crash-loops
@@ -103,7 +138,11 @@ class Settings(BaseSettings):
     @field_validator("port", "watchlist_max_entities", "fetch_timeout_s", "disable_gdelt",
                      "search_timeout_s", "search_cache_ttl_s", "search_cache_max",
                      "upstream_concurrency", "smtp_port", "scheduler_enabled",
-                     "scheduler_tick_s", "log_json", mode="before")
+                     "scheduler_tick_s", "log_json", "monitor_enabled",
+                     "monitor_google_per_hour", "monitor_refresh_hours",
+                     "monitor_window_days", "monitor_adverse_query", "official_sebi",
+                     "official_ibbi", "official_nse", "ibbi_pages", "ibbi_history_pages",
+                     "monitor_history_days", mode="before")
     @classmethod
     def _tolerate_stray_punctuation(cls, v: object, info: ValidationInfo) -> object:
         if not isinstance(v, str):
@@ -144,6 +183,42 @@ class Settings(BaseSettings):
         is correct. Say so instead of guessing.
         """
         return self.smtp_pass.rstrip().endswith((",", ";"))
+
+    # A window that does not parse keeps the DEFAULT night window, loudly: crash-looping
+    # PULSE (digest and all) over the monitor's hours is worse, and quietly searching all
+    # day would spend the desk's Google allowance on a typo.
+    @field_validator("monitor_hours", mode="before")
+    @classmethod
+    def _monitor_hours_or_default(cls, v: object) -> object:
+        from app.news.monitor import parse_hours
+
+        default = cls.model_fields["monitor_hours"].default
+        if not isinstance(v, str):
+            return default
+        cleaned = v.strip().strip(",;").strip().strip("'\"").strip()
+        try:
+            parse_hours(cleaned)
+        except ValueError:
+            log.warning("pulse_monitor_hours_invalid", extra={"value": cleaned,
+                                                              "using": default})
+            return default
+        return cleaned
+
+    def monitor_tenant_list(self) -> list[str]:
+        return ([t.strip() for t in self.monitor_tenants.split(",") if t.strip()]
+                or [self.register_tenant])
+
+    def monitor_config(self):  # noqa: ANN201 - the monitor's own dataclass, imported lazily
+        from app.news.monitor import MonitorConfig, parse_hours
+
+        return MonitorConfig(
+            enabled=self.monitor_enabled, google_per_hour=self.monitor_google_per_hour,
+            refresh_hours=self.monitor_refresh_hours, window_days=self.monitor_window_days,
+            hours=parse_hours(self.monitor_hours),
+            ibbi_pages=self.ibbi_pages, ibbi_history_pages=self.ibbi_history_pages,
+            sebi=self.official_sebi, ibbi=self.official_ibbi, nse=self.official_nse,
+            adverse_query=self.monitor_adverse_query,
+            history_days=self.monitor_history_days)
 
     def api_key_list(self) -> list[str]:
         return [k.strip() for k in self.api_keys.split(",") if k.strip()]

@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo } from 'react';
+import { useState, useRef, useMemo, useEffect, useCallback } from 'react';
 import { Box, Button, Chip, Typography, Paper, TextField, Accordion, AccordionSummary, AccordionDetails, Alert, Link, LinearProgress } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { useSearch } from '../../context/SearchContext';
@@ -6,7 +6,7 @@ import { CodeText } from '../../components/common/Pills';
 import { db } from '../../api/atlasStore';
 import { useAuth } from '../../auth/AuthContext';
 import { tokens } from '../../theme';
-import { newsService, news, watch, classify, fetchTerm, lastFailure, contextReason, isLiveBorrower, tradingName, SEV_LABEL, type Severity, type NewsItem } from '../../services/newsService';
+import { newsService, monitorService, linkedFirms, evidenceText, news, watch, classify, fetchTerm, lastFailure, contextReason, isLiveBorrower, tradingName, SEV_LABEL, type Severity, type NewsItem, type Evidence, type MonitorStatus } from '../../services/newsService';
 import { EmailNewsDialog, EmailAllFirmsDialog } from './EmailDialogs';
 import SchedulesDialog from './SchedulesDialog';
 
@@ -23,6 +23,11 @@ const SEV_BG: Record<Severity, string> = {
   BLUE: '#1F6FA8',
 };
 
+const RUN_LABEL: Record<string, string> = {
+  hourly: 'Hourly batch', full: 'Scanning all firms', history: '12-month history',
+  official: 'Insolvency records check',
+};
+
 function SevPill({ s }: { s: Severity }) {
   return (
     <Box component="span" sx={{ flex: '0 0 auto', fontSize: 10, fontWeight: 800, borderRadius: '99px',
@@ -31,22 +36,39 @@ function SevPill({ s }: { s: Severity }) {
 }
 
 // One headline row — click anywhere opens the source article.
-function NewsLine({ severity, headline, url, meta, onOpen, actions, flag }: {
+function NewsLine({ severity, headline, url, meta, onOpen, actions, flag, evidence, about, official, seen }: {
   severity: Severity; headline: string; url?: string; meta: string;
   onOpen: () => void; actions?: React.ReactNode; flag?: string;
+  evidence?: Evidence; about?: string; official?: boolean; seen?: boolean;
 }) {
+  const ev = evidenceText(evidence);
   return (
     <Box onClick={onOpen} title="Open the source article"
       sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, py: 0.8, px: 1, cursor: 'pointer',
         borderTop: `1px solid ${tokens.line}`, borderLeft: `3px solid ${SEV_BG[severity]}`,
         '&:hover': { bgcolor: '#F7FAFB' } }}>
       <SevPill s={severity} />
-      <Box sx={{ flex: 1, minWidth: 0 }}>
+      <Box sx={{ flex: 1, minWidth: 0, opacity: seen ? 0.7 : 1 }}>
+        {/* Who it is about, when it was found through a director or promoter. */}
+        {about && (
+          <Typography sx={{ fontSize: 11, fontWeight: 700, color: '#1F6FA8' }}>{about}</Typography>
+        )}
         <Typography sx={{ fontSize: 13, fontWeight: 600, lineHeight: 1.35, wordBreak: 'break-word' }}>
+          {official && (
+            <Box component="span" title="A regulator's own record, not a news report"
+              sx={{ fontSize: 10, fontWeight: 800, color: tokens.navy, border: `1px solid ${tokens.navy}`,
+                borderRadius: '4px', px: '4px', mr: 0.6, verticalAlign: 'middle' }}>RECORD</Box>
+          )}
           {url ? <Link href={url} target="_blank" rel="noopener" underline="hover"
             onClick={(e) => e.stopPropagation()} sx={{ color: tokens.navy }}>{headline} ↗</Link> : headline}
         </Typography>
-        <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>{meta}</Typography>
+        <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>{meta}{seen ? ' · ✓ seen' : ''}</Typography>
+        {/* AN ALLEGATION IS NOT AN ORDER. Both are Ugly; the desk has to tell a probe
+            from a ban before it acts, and the line says which this story is. */}
+        {ev && (
+          <Typography title="PRISM's reading of the headline (or the regulator's record) — open the source before acting"
+            sx={{ fontSize: 11.3, color: '#5A4A1F', mt: 0.2 }}>{ev}</Typography>
+        )}
         {/* The context flip, explained where it is read. Good-looking news on a firm we
             have lent to is a question, and the answer to "why is this flagged?" has to
             be one hover away or the flag is just noise. */}
@@ -85,7 +107,44 @@ export default function NewsRadar() {
   const [emailAll, setEmailAll] = useState(false);
   const [sched, setSched] = useState<false | 'all' | 'plain'>(false);
 
-  const all = news();
+  /* THE MONITOR'S FINDINGS ARE THE BOOK. PULSE searches every firm through the day and
+     files what it finds in the Register; this screen opens on those, read as the
+     signed-in user. "Scan all now" is there for when the desk wants it this minute. */
+  const [findings, setFindings] = useState<NewsItem[]>([]);
+  const [days, setDays] = useState(30);
+  const [mstat, setMstat] = useState<MonitorStatus | null>(null);
+  const [mErr, setMErr] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [showGaps, setShowGaps] = useState(false);
+  const [notice, setNotice] = useState('');
+
+  const loadFindings = useCallback(async () => {
+    setLoading(true);
+    try { setFindings(await monitorService.findings(days)); setMErr(''); }
+    catch (e: any) { setMErr('Could not read the findings — ' + String(e?.message || e)); }
+    finally { setLoading(false); }
+  }, [days]);
+  const loadStatus = useCallback(async () => {
+    try { setMstat(await monitorService.status()); }
+    catch { setMstat(null); }   // no monitor here: the screen falls back to browser scans
+  }, []);
+  useEffect(() => { loadFindings(); }, [loadFindings]);
+  useEffect(() => { loadStatus(); }, [loadStatus]);
+  // While a pass runs: its progress every 10 s, the findings it has filed every minute,
+  // and once more when it ends.
+  const running = Boolean(mstat?.run?.running);
+  useEffect(() => {
+    if (!running) return undefined;
+    const st = setInterval(loadStatus, 10_000);
+    const fi = setInterval(loadFindings, 60_000);
+    return () => { clearInterval(st); clearInterval(fi); loadFindings(); };
+  }, [running, loadStatus, loadFindings]);
+
+  // The local store still holds what this browser scanned itself (policy sweeps, and
+  // the fallback when no monitor answers); a story already among the findings is shown once.
+  const seenKeys = new Set(findings.map((n) => n.code + '|' + n.headline.toLowerCase()));
+  const all = [...findings,
+    ...news().filter((n) => !seenKeys.has(n.code + '|' + n.headline.toLowerCase()))];
   const reds = all.filter((n) => n.severity === 'RED').length;
   const ambs = all.filter((n) => n.severity === 'AMBER').length;
   const blues = all.filter((n) => n.severity === 'BLUE').length;
@@ -107,6 +166,12 @@ export default function NewsRadar() {
     () => (sev ? adhoc.items.filter((n) => n.severity === sev) : adhoc.items),
     [adhoc.items, sev]);
 
+  // Ugly / bad stories per firm, for the linked-firm line on each card.
+  const adverseOf = new Map<string, number>();
+  all.forEach((n) => {
+    if (n.severity === 'RED' || n.severity === 'AMBER') adverseOf.set(n.code, (adverseOf.get(n.code) || 0) + 1);
+  });
+
   // Group by firm, most-adverse first.
   const groups = useMemo(() => {
     const by: Record<string, NewsItem[]> = {};
@@ -119,6 +184,15 @@ export default function NewsRadar() {
   }, [shown]);
 
   /* ---------------- scans ---------------- */
+  /** Scan every firm now — on the server, in the background, paced for Google. The
+   *  browser sweep below is kept only for a deployment with no monitor. */
+  const scanAllNow = async (mode: 'all' | 'history' | 'official' = 'all') => {
+    if (!mstat) { await scanAll(); return; }
+    const r = await monitorService.scanAll(user.full, mode);
+    setNotice(r.message);
+    await loadStatus();
+  };
+
   const scanAll = async () => {
     if (scan.running) return;
     // total 0 until the sweep knows its term list — an honest "reading the register…"
@@ -163,9 +237,29 @@ export default function NewsRadar() {
     }
   };
 
+  const [busyFirm, setBusyFirm] = useState('');
   const scanOne = async (code: string) => {
-    await newsService.scanCompany(code, user.full);
-    bump();
+    setBusyFirm(code);
+    try {
+      if (mstat && (db().clients as any)?.[code]?.entityId) {
+        const r = await monitorService.scanFirm(code, user.full);
+        setNotice(`${db().clients?.[code]?.name || code}: ${r.message}`);
+        await loadFindings();
+      } else {
+        await newsService.scanCompany(code, user.full);
+      }
+    } finally { setBusyFirm(''); bump(); }
+  };
+
+  const triage = async (n: NewsItem, how: 'seen' | 'dismiss') => {
+    try {
+      if (how === 'seen') await monitorService.acknowledge(n, user.full);
+      else await monitorService.dismiss(n, user.full);
+      setFindings((fs) => how === 'dismiss' ? fs.filter((f) => f.id !== n.id)
+        : fs.map((f) => (f.id === n.id ? { ...f, acknowledged: true } : f)));
+    } catch (e: any) {
+      setNotice('Could not record that — ' + String(e?.response?.data?.error?.detail || e?.message || e));
+    }
   };
 
   // The risk that never names the firm — state-level tariff / ALMM / open-access moves.
@@ -312,11 +406,106 @@ export default function NewsRadar() {
             company is quiet or this deployment has no way out to the internet. */}
         <Button onClick={runProbe}>🩺 Check sources</Button>
         {all.length > 0 && <Button onClick={() => setEmailAll(true)}>📧 Email firms’ news</Button>}
-        {all.length > 0 && <Button color="error" onClick={clearAll}>🗑 Clear all news</Button>}
-        <Button variant="contained" disabled={scan.running} onClick={scanAll}>
-          {scan.running ? 'Scanning…' : '📡 Scan all firms'}
+        {/* Clears only what THIS browser scanned; the monitor's findings are the
+            Register's, and are set aside one by one ("Not relevant"), shared. */}
+        {news().length > 0 && <Button color="error" onClick={clearAll}>🗑 Clear browser scans</Button>}
+        {mstat && (
+          <Button disabled={running}
+            title="Every firm against ~2,000 past IBBI insolvency announcements (about 19 months), the SEBI orders feed and a fortnight of NSE filings — a few minutes, no news search"
+            onClick={() => scanAllNow('official')}>🏛 Insolvency records</Button>
+        )}
+        {mstat && (
+          <Button disabled={running}
+            title="Every firm and its promoters, 12 months back, plus the official records — hours, at Google's pace"
+            onClick={() => scanAllNow('history')}>📜 12-month history</Button>
+        )}
+        <Button variant="contained" disabled={scan.running || running} onClick={() => scanAllNow('all')}>
+          {scan.running || running ? 'Scanning…' : '📡 Scan all now'}
         </Button>
       </Box>
+
+      {/* ---- the monitor: what has been searched, what has not, and why ---- */}
+      {mstat && (
+        <Paper variant="outlined" sx={{ borderColor: tokens.line, px: 1.2, py: 0.8, mb: 1, fontSize: 12 }}>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
+            <Typography sx={{ fontSize: 12, fontWeight: 700 }}>🛰 Monitor</Typography>
+            <Typography sx={{ fontSize: 12, color: tokens.muted }}>
+              {mstat.enabled
+                ? <>{mstat.searched_fresh} of {mstat.firms} firms searched in the last {mstat.refresh_hours} h
+                  {mstat.next_batch && !running
+                    ? <> · next batch {new Date(mstat.next_batch * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</>
+                    : null}
+                  {' '}· Google {mstat.google_per_hour}/h
+                  {mstat.hours ? <> · searches nightly {mstat.hours}</> : null}</>
+                : 'off — searches run only when asked'}
+            </Typography>
+            {/* Promoters are where adverse news usually is; say how many firms have
+                theirs searched, so "nothing ugly" is read for what it covers. */}
+            {mstat.people && (
+              <Typography sx={{ fontSize: 12, color: mstat.people.firms_with_people < mstat.firms / 2 ? tokens.warn : tokens.muted }}
+                title="Key people set on the firm, plus lead contacts whose designation is a promoter or leadership role (full names only). Add people on the firm to widen this.">
+                · promoters searched for {mstat.people.firms_with_people} of {mstat.firms} firms
+                {mstat.people.from_leads ? ` (${mstat.people.from_leads} from leads)` : ''}
+              </Typography>
+            )}
+            {Object.entries(mstat.official || {}).map(([src, o]) => (
+              <Chip key={src} size="small" variant="outlined"
+                color={o.ok ? 'default' : 'error'}
+                title={`${o.detail}${o.at ? ' · read ' + new Date(o.at * 1000).toLocaleString() : ''}`}
+                label={`${o.ok ? '✓' : '⚠'} ${src}${o.ok && o.matched ? ` · ${o.matched} on our firms` : ''}`}
+                sx={{ height: 20, fontSize: 10.5 }} />
+            ))}
+            <Typography title={Object.entries(mstat.not_covered || {}).map(([k, v]) => `${k}: ${v}`).join('\n')}
+              sx={{ fontSize: 11, color: tokens.muted, cursor: 'help' }}>
+              not covered: {Object.keys(mstat.not_covered || {}).join(', ')}
+            </Typography>
+            <Box sx={{ flex: 1 }} />
+            {[7, 30, 90].map((d) => (
+              <Chip key={d} size="small" label={`${d} days`} clickable
+                variant={days === d ? 'filled' : 'outlined'} color={days === d ? 'primary' : 'default'}
+                onClick={() => setDays(d)} sx={{ height: 22 }} />
+            ))}
+            <Button onClick={() => { loadFindings(); loadStatus(); }} disabled={loading}>
+              {loading ? 'loading…' : '↻ Refresh'}
+            </Button>
+          </Box>
+          {running && (
+            <Box sx={{ mt: 0.6 }}>
+              <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>
+                {RUN_LABEL[mstat.run.kind || ''] || 'Hourly batch'} — {mstat.run.done || 0} / {mstat.run.total || '…'} firms
+                {' '}· {mstat.run.filed || 0} new findings · {mstat.run.note}
+              </Typography>
+              <LinearProgress variant={mstat.run.total ? 'determinate' : 'indeterminate'}
+                value={mstat.run.total ? Math.round(((mstat.run.done || 0) / mstat.run.total) * 100) : undefined}
+                sx={{ mt: 0.4, height: 4, borderRadius: 99 }} />
+            </Box>
+          )}
+          {!running && mstat.run?.note && (
+            <Typography sx={{ fontSize: 11.5, color: tokens.muted, mt: 0.4 }}>
+              Last {(RUN_LABEL[mstat.run.kind || ''] || 'hourly batch').toLowerCase()}
+              {mstat.run.finished ? ` (${new Date(mstat.run.finished * 1000).toLocaleString()})` : ''}: {mstat.run.note}
+            </Typography>
+          )}
+          {/* NO SILENT GAPS: a firm the monitor could not completely search is named,
+              with the source that failed it, until it has been. */}
+          {mstat.gap_count > 0 && (
+            <Typography sx={{ fontSize: 11.5, mt: 0.4 }}>
+              <Link component="button" onClick={() => setShowGaps((v) => !v)} sx={{ fontSize: 11.5 }}>
+                {mstat.gap_count} firm{mstat.gap_count === 1 ? '' : 's'} not completely searched in the last day
+              </Link>
+              {showGaps && (
+                <Box component="span" sx={{ display: 'block', color: tokens.muted, mt: 0.3 }}>
+                  {mstat.gaps.map((g) => `${g.name} — ${Object.entries(g.down || {}).map(([s, w]) => `${s}: ${w}`).join('; ')
+                    || (g.last_ok ? 'last searched ' + new Date(g.last_ok * 1000).toLocaleString() : 'not reached yet')}`).join(' · ')}
+                  {mstat.gap_count > mstat.gaps.length ? ` · and ${mstat.gap_count - mstat.gaps.length} more` : ''}
+                </Box>
+              )}
+            </Typography>
+          )}
+        </Paper>
+      )}
+      {mErr && <Alert severity="warning" onClose={() => setMErr('')} sx={{ py: 0, fontSize: 12, mb: 1 }}>{mErr}</Alert>}
+      {notice && <Alert severity="info" onClose={() => setNotice('')} sx={{ py: 0, fontSize: 12, mb: 1 }}>{notice}</Alert>}
 
       {probe && (
         <Alert severity={/^NO source|could not reach/.test(probe) ? 'error' : 'info'}
@@ -408,7 +597,10 @@ export default function NewsRadar() {
       {!all.length ? (
         <Paper variant="outlined" sx={{ borderColor: tokens.line, p: 3, textAlign: 'center' }}>
           <Typography sx={{ color: tokens.muted, fontSize: 12.5 }}>
-            No news on file — hit <b>📡 Scan all firms</b> (requires internet; only real articles are stored).
+            {loading ? 'Reading the monitor’s findings…'
+              : mstat ? <>No findings in the last {days} days{mstat.searched_fresh ? '' : ' — the monitor has not searched yet'}.
+                Hit <b>📡 Scan all now</b> to search every firm this minute (only real articles are stored).</>
+                : <>No news on file — hit <b>📡 Scan all now</b> (requires internet; only real articles are stored).</>}
           </Typography>
         </Paper>
       ) : !groups.length ? (
@@ -448,7 +640,10 @@ export default function NewsRadar() {
                     title="Our money is out to this firm, so good-looking news is flagged for review rather than filed as a win."
                     sx={{ height: 20, fontSize: 10.5 }} />
                 )}
-                <Button onClick={(e) => { e.stopPropagation(); scanOne(code); }}>↻ Scan</Button>
+                <Button disabled={busyFirm === code}
+                  onClick={(e) => { e.stopPropagation(); scanOne(code); }}>
+                  {busyFirm === code ? 'searching…' : '↻ Scan'}
+                </Button>
                 {c.state && (
                   <Button disabled={policyBusy === code}
                     title={`Policy sweep: tariff / ALMM / payment-security / net-metering × ${c.state} — these never name the firm`}
@@ -474,11 +669,40 @@ export default function NewsRadar() {
                 ))}
                 <Button onClick={() => addTerm(code)}>＋ owner / term</Button>
               </Box>
+              {/* LINKED FIRMS: a sibling in the same promoter group, or a firm sharing a
+                  key person, with adverse news of its own — risk that travels. */}
+              {(() => {
+                const links = linkedFirms(code)
+                  .map((l) => ({ ...l, ugly: adverseOf.get(l.code) || 0 }))
+                  .filter((l) => l.ugly > 0);
+                return links.length ? (
+                  <Box sx={{ px: 1, pb: 0.8, display: 'flex', flexWrap: 'wrap', gap: 0.6, alignItems: 'center' }}>
+                    <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>🔗 linked firms with adverse news:</Typography>
+                    {links.map((l) => (
+                      <Chip key={l.code} size="small" variant="outlined" color="error"
+                        label={`${db().clients?.[l.code]?.name || l.code} (${l.why}) · ${l.ugly} ugly/bad`}
+                        sx={{ height: 20, fontSize: 10.5 }} />
+                    ))}
+                  </Box>
+                ) : null;
+              })()}
               {items.map((n) => (
                 <NewsLine key={n.id} severity={n.severity} headline={n.headline} url={n.url}
-                  meta={`${n.source || ''} · ${n.when || ''} · matched “${n.term}”`}
+                  meta={`${n.source || ''} · ${n.when || ''}`
+                    + (n.official || n.about || !n.term ? '' : ` · matched “${n.term}”`)}
+                  about={n.about} evidence={n.evidence} official={n.official} seen={n.acknowledged}
                   flag={n.category === 'context-review'
                     ? (n.reason || contextReason(n.headline)) : undefined}
+                  actions={n.intelId ? (
+                    <>
+                      {!n.acknowledged && (
+                        <Button size="small" title="Mark as read — shared with the desk"
+                          onClick={() => triage(n, 'seen')}>✓ Seen</Button>
+                      )}
+                      <Button size="small" color="inherit" title="Not about this firm, or not material — hidden for everyone"
+                        onClick={() => triage(n, 'dismiss')}>✕ Not relevant</Button>
+                    </>
+                  ) : undefined}
                   onOpen={() => newsService.open(n, user.full)} />
               ))}
             </AccordionDetails>
@@ -487,7 +711,7 @@ export default function NewsRadar() {
       })}
 
       <EmailNewsDialog open={emailNews} onClose={() => setEmailNews(false)} adhoc={adhoc} />
-      <EmailAllFirmsDialog open={emailAll} onClose={() => setEmailAll(false)} />
+      <EmailAllFirmsDialog open={emailAll} onClose={() => setEmailAll(false)} items={all} />
       <SchedulesDialog open={sched !== false} prefillAll={sched === 'all'} onClose={() => setSched(false)} />
     </>
   );

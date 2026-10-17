@@ -42,6 +42,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import Settings, get_settings
 from app.matching import WatchEntity, classify_signal, match_entities
+from app.news import monitor as mon
 from app.news import schedules as sched
 from app.news.mailer import digest_html, digest_page, send_email
 from app.news.search import NewsSearch
@@ -186,22 +187,33 @@ def create_app() -> FastAPI:
         if not writable:
             log.error("pulse_schedule_store_unwritable",
                       extra={"path": settings.schedule_file, "error": why})
+        app.state.monitor_store = mon.MonitorStore(settings.monitor_file)
+        app.state.monitor = mon.Monitor(
+            app.state.monitor_store, app.state.search, _monitor_firms, _file_finding,
+            settings.monitor_config(), settings.monitor_tenant_list())
+        app.state.monitor_task = None
+        if settings.monitor_enabled:
+            app.state.monitor_task = asyncio.create_task(
+                app.state.monitor.loop(tick_seconds=settings.scheduler_tick_s))
         app.state.scheduler_task = None
         if settings.scheduler_enabled:
             app.state.scheduler_task = asyncio.create_task(
                 sched.scheduler_loop(app.state.schedules, _run_one_schedule,
-                                     tick_seconds=settings.scheduler_tick_s))
+                                     tick_seconds=settings.scheduler_tick_s,
+                                     lead=_lead))
         log.info("pulse_started", extra={
             "register": settings.register_base_url,
             "sources": [s.get("name") for s in settings.source_list()],
             "email": settings.smtp().ready, "gdelt": not settings.disable_gdelt,
             "schedules": len(app.state.schedules.all()), "store_writable": writable})
         yield
-        task = app.state.scheduler_task
-        if task is not None:
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
+        for task in (app.state.scheduler_task, app.state.monitor_task,
+                     *app.state.monitor.running.values()):
+            if task is not None:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+        app.state.monitor_store.save()
         for client in app.state.register_clients.values():
             await client.aclose()
         # The engine's own upstream pool holds keep-alive sockets to the news sources.
@@ -346,6 +358,78 @@ def create_app() -> FastAPI:
             return firms
         return _fetch
 
+    # ---- the monitor's three doors to the Register ----------------------------
+    async def _monitor_firms(tenant: str) -> list[dict[str, Any]]:
+        """The tenant's firms as the monitor needs them: identity for filing, the names
+        to search and to match official records against, the people, the group."""
+        client = _tenant_client(app, tenant)
+        # Promoters and directors named on the desk's leads (contact + designation).
+        # A Register that refuses (an older service grant) costs the people, not the pass.
+        leads: list[dict[str, Any]] = []
+        try:
+            async for lead in client.iterate("leads", page_size=200):
+                leads.append({k: lead.get(k) for k in ("entity_id", "contact",
+                                                        "designation", "city")})
+        except RegisterError as exc:
+            log.warning("pulse_monitor_leads_unreadable", extra={"tenant": tenant,
+                                                                 "error": str(exc)})
+        from_leads = mon.lead_people(leads)
+        firms: list[dict[str, Any]] = []
+        async for row in client.iterate("entities", page_size=200):
+            name = (row.get("display_name") or row.get("legal_name") or "").strip()
+            if not name:
+                continue
+            firms.append({"id": str(row["id"]), "name": name,
+                          "legal_name": row.get("legal_name") or "",
+                          "aliases": row.get("news_aliases") or [],
+                          "people": mon.merge_people(row.get("key_people") or [],
+                                                     from_leads.get(str(row["id"]), [])),
+                          "city": row.get("city") or "", "cin": row.get("cin") or "",
+                          "group": row.get("promoter_group_code") or "",
+                          "watch": row.get("news_watch") is not False})
+            if len(firms) >= settings.watchlist_max_entities:
+                break
+        return firms
+
+    async def _file_finding(tenant: str, key: str, row: dict[str, Any]) -> None:
+        """One finding into the Register. The Idempotency-Key is the story's identity
+        for the firm, so a retry after a timeout is a replay, not a second row."""
+        await _tenant_client(app, tenant).create("external-intelligence", row,
+                                                 idempotency_key=key)
+
+    async def _stored_findings(tenant: str, dfrom: str, dto: str,
+                               ) -> tuple[list[tuple[str, list[dict[str, Any]]]],
+                                          dict[str, Any]]:
+        """What the monitor filed in the window, for the digest. Rows come newest
+        first, so the read stops at the first row filed before the window opened."""
+        client = _tenant_client(app, tenant)
+        firms = await app.state.monitor.watched(tenant)
+        since = datetime.strptime(dfrom, "%Y-%m-%d").replace(tzinfo=UTC) - timedelta(days=1)
+        rows: list[dict[str, Any]] = []
+        for intel_type in ("News", "Regulatory"):
+            async for row in client.iterate("external-intelligence", page_size=200,
+                                            intel_type=intel_type):
+                created = row.get("created_at")
+                if created and datetime.fromisoformat(created) < since:
+                    break
+                if (row.get("payload") or {}).get("monitor"):
+                    rows.append(row)
+        return mon.findings_digest(rows, firms, app.state.monitor_store.tenant(tenant),
+                                   dfrom, dto)
+
+    def _uses_monitor(schedule: dict) -> bool:
+        return settings.monitor_enabled and schedule.get("scope") == "all-firms"
+
+    def _stored_for(schedule: dict):
+        if not _uses_monitor(schedule):
+            return None
+        tenant = str(schedule.get("tenant") or settings.register_tenant)
+        return lambda dfrom, dto: _stored_findings(tenant, dfrom, dto)
+
+    def _lead(schedule: dict) -> float:
+        # Reading stored findings takes seconds; five minutes covers a slow Register.
+        return 300.0 if _uses_monitor(schedule) else sched.lead_seconds(schedule)
+
     async def _run_one_schedule(schedule: dict, send_at: float | None = None,
                                 ) -> tuple[bool, str, int, int]:
         """The scheduler's callback — searches, then emails. Bound here so it closes over
@@ -359,7 +443,7 @@ def create_app() -> FastAPI:
             firm_terms=_firm_terms_for(schedule),
             already_sent=app.state.schedules.sent_keys(schedule["id"]),
             on_sent=lambda keys: app.state.schedules.remember_sent(schedule["id"], keys),
-            send_at=send_at)
+            send_at=send_at, stored=_stored_for(schedule))
 
     @app.get("/v1/news/search", tags=["News Radar"],
              summary="Search the news for a term (Google News + GDELT + Bing, merged)")
@@ -720,7 +804,8 @@ def create_app() -> FastAPI:
                     digest=digest_page,
                     firm_terms=_firm_terms_for(schedule),
                     already_sent=store.sent_keys(sid),
-                    on_sent=lambda keys: store.remember_sent(sid, keys))
+                    on_sent=lambda keys: store.remember_sent(sid, keys),
+                    stored=_stored_for(schedule))
                 store.record_run(sid, ok=ok, note=f"run now: {msg}", firms=firms,
                                  items=items, seconds=schedule.pop("_search_seconds", None))
             except Exception as exc:  # noqa: BLE001 - recorded, never raised into the loop
@@ -733,11 +818,76 @@ def create_app() -> FastAPI:
         task = asyncio.create_task(job())
         request.app.state.background_runs.add(task)
         task.add_done_callback(request.app.state.background_runs.discard)
-        minutes = max(1, round(sched.lead_seconds(schedule) / 60))
+        minutes = max(1, round(_lead(schedule) / 60))
         return ORJSONResponse(status_code=202, content={
             "ok": True, "started": True,
             "message": f"Running in the background (about {minutes} min); the result "
                        "will appear under Last run."})
+
+    # ================= News Radar: the monitor =================
+    @app.get("/v1/news/monitor", tags=["News Radar"],
+             summary="The monitor's coverage: firms searched, gaps, official sources")
+    async def monitor_status(request: Request, tenant: str = Depends(tenant_of),
+                             x_api_key: str | None = Header(default=None,
+                                                            alias="X-API-Key")) -> Any:
+        """What the screen shows above the findings: how much of the book has been
+        searched recently, which firms have not (and why), when the next hourly batch
+        is, whether a full pass is running and how far it has got, and the official
+        sources' last read. Names and counts only — the findings themselves are read
+        from the Register as the signed-in user."""
+        if (denied := _require_api_key(settings, x_api_key)) is not None:
+            return denied
+        writable, why = request.app.state.monitor_store.probe()
+        return {**request.app.state.monitor.status(tenant),
+                "store_ok": writable, "store_error": why}
+
+    @app.post("/v1/news/monitor/scan", tags=["News Radar"],
+              summary="Scan all firms now (background), or one firm (waits up to 50 s)")
+    async def monitor_scan(payload: dict, request: Request,
+                           tenant: str = Depends(tenant_of),
+                           x_api_key: str | None = Header(default=None,
+                                                          alias="X-API-Key")) -> Any:
+        """``{"scope": "all", "history": bool}`` starts a full pass in the background
+        (409 while one runs); its progress is GET /v1/news/monitor. ``history`` searches
+        every firm 12 months back and pages through IBBI's announcements.
+        ``{"scope": "official"}`` checks every firm against the official records'
+        history only (minutes, no Google). ``{"scope": "firm", "entity_id": …}``
+        searches one firm and answers within 50 s, or says it is still going."""
+        if (denied := _require_api_key(settings, x_api_key)) is not None:
+            return denied
+        monitor: mon.Monitor = request.app.state.monitor
+        if payload.get("scope") == "official":
+            if not monitor.start(tenant, full=False, official_only=True):
+                return ORJSONResponse(status_code=409, content={
+                    "ok": False, "message": "A scan is already running."})
+            return ORJSONResponse(status_code=202, content={
+                "ok": True, "started": True,
+                "message": "Checking every firm against the official records' history "
+                           "(IBBI, SEBI) — a few minutes, no news search."})
+        if (payload.get("scope") or "all") == "firm":
+            entity_id = str(payload.get("entity_id") or "")
+            task = asyncio.create_task(monitor.scan_firm(tenant, entity_id))
+            request.app.state.background_runs.add(task)
+            task.add_done_callback(request.app.state.background_runs.discard)
+            try:
+                filed = await asyncio.wait_for(asyncio.shield(task), timeout=50)
+            except TimeoutError:
+                return ORJSONResponse(status_code=202, content={
+                    "ok": True, "done": False,
+                    "message": "Still searching (Google is paced) — the findings will "
+                               "appear when it finishes."})
+            if filed is None:
+                return ORJSONResponse(status_code=404, content={
+                    "ok": False, "message": "Not a watched firm of this tenant."})
+            return {"ok": True, "done": True, "filed": filed}
+        if not monitor.start(tenant, full=True, history=bool(payload.get("history"))):
+            return ORJSONResponse(status_code=409, content={
+                "ok": False, "message": "A scan is already running — its progress is "
+                                        "shown above the findings."})
+        return ORJSONResponse(status_code=202, content={
+            "ok": True, "started": True,
+            "message": "Scanning every firm in the background, paced to what Google "
+                       "allows; findings appear as they are filed."})
 
     return app
 

@@ -80,6 +80,9 @@ def test_capability_routes_map_to_operations():
     # later and forwarded UNGATED until it was pinned here.
     for tail in ("", "/delete", "/run", "/update"):
         assert operation_for("POST", f"/pulse/v1/news/schedules{tail}") == "run_news_scan"
+    # The monitor: a full scan spends the firm's Google allowance, so it is gated too.
+    assert operation_for("GET", "/pulse/v1/news/monitor") == "run_news_scan"
+    assert operation_for("POST", "/pulse/v1/news/monitor/scan") == "run_news_scan"
     assert operation_for("POST", "/orchestrator/v1/workflows/lead-conversions") == \
         "push_lead_to_deals"
     assert operation_for("POST", "/orchestrator/v1/workflows/abc123/approve") == \

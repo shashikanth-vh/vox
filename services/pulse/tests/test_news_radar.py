@@ -752,7 +752,10 @@ def test_a_firm_is_watched_under_the_short_name_the_press_prints_only_when_it_is
     from app.news.names import short_name, watch_names
     assert short_name("Enerparc Energy") == "Enerparc"
     assert short_name("Saera Electric Auto") == "Saera"
-    assert short_name("Pashupati Group") == "Pashupati"
+    # A group is searched whole: "Pashupati" alone found a Kathmandu temple and an
+    # unrelated listed company (cipher-test, 16 Oct).
+    assert short_name("Pashupati Group") is None
+    assert watch_names("Pashupati Group") == ["Pashupati Group"]
     assert short_name("Euroteck Environmental") == "Euroteck"
     for generic in ("Future Solar", "Capital Energy", "Atlanta System", "Rajasthan Solar",
                     "Surya Synergy", "Clear Water", "Green Next Energy", "Sada Energy",
@@ -872,7 +875,7 @@ async def test_a_failing_source_is_paused_and_reported_not_hammered():
         assert await gate.enter() is None
         gate.done(False)
     why = await gate.enter()
-    assert why and why.startswith("paused after 3 failures")
+    assert why and "failing for a long stretch" in why
 
 
 @pytest.mark.asyncio
@@ -910,12 +913,15 @@ async def test_the_digest_says_which_sources_could_not_be_searched_for_how_many_
 
 
 @pytest.mark.asyncio
-async def test_a_firm_is_never_searched_with_or_because_bing_answers_it_with_nothing(monkeypatch):
+async def test_bing_is_never_searched_with_or_but_google_takes_the_names_in_one(monkeypatch):
     """Live on cipher-test: Bing returned 0 items for '"Enerparc Energy" OR "Enerparc"'
-    and 14 for '"Enerparc"', so every firm with a short name was blind on Bing. Each name
-    is its own query now, and a name containing another one is not asked separately."""
+    and 14 for '"Enerparc"', so every firm with a short name was blind on Bing — each
+    name is its own Bing query. Google takes OR, and its hourly allowance is the scarce
+    thing, so a firm's names are ONE Google query. Either way a name containing another
+    one is not asked separately."""
     engine = NewsSearch(disable_gdelt=True, pace=False)
     asked = []
+    asked_google = []
 
     async def fake(client, q, dfrom, dto, **kw):
         asked.append(q)
@@ -923,11 +929,15 @@ async def test_a_firm_is_never_searched_with_or_because_bing_answers_it_with_not
                   "source": "PV", "when": "20261007", "via": "Bing News"}],
                 {"name": "Bing News", "ok": True, "count": 1})
 
-    monkeypatch.setattr(engine, "_google", fake)
+    async def fake_google(client, q, dfrom, dto, **kw):
+        asked_google.append(q)
+        return await fake(client, q, dfrom, dto, **kw)
+
+    monkeypatch.setattr(engine, "_google", fake_google)
     monkeypatch.setattr(engine, "_bing", fake)
     got = await engine.search("Enerparc Energy", "2026-10-06", "2026-10-13", strict=True,
                               names=["Enerparc Energy", "Enerparc"])
-    assert asked == ['"Enerparc"', '"Enerparc"'], "one query per source, no OR"
+    assert asked == ['"Enerparc"', '"Enerparc"'], "one query per source"
     assert len(got) == 1, "the same article from both sources appears once"
     assert got[0]["matched"] == "Enerparc"
     from app.news.mailer import digest_page
@@ -937,9 +947,13 @@ async def test_a_firm_is_never_searched_with_or_because_bing_answers_it_with_not
                         "2026-10-06", "2026-10-13")
     assert "found as" not in plain, "a full-name match needs no remark"
     asked.clear()
+    asked_google.clear()
     await engine.search("Land", "2026-10-06", "2026-10-13", strict=True,
                         names=["Land Renewables", "LRPL"])
-    assert sorted(asked) == ['"LRPL"', '"LRPL"', '"Land Renewables"', '"Land Renewables"']
+    assert asked_google == ['"Land Renewables" OR "LRPL"'], "Google: one query, OR"
+    bing = [q for q in asked if q not in asked_google]
+    assert sorted(bing) == ['"LRPL"', '"Land Renewables"'], "Bing: one per name, no OR"
+    assert not any(" OR " in q for q in bing)
 
 
 def test_the_word_list_ships_inside_the_package_not_only_in_the_source_tree():
@@ -1032,6 +1046,53 @@ async def test_retry_passes_stop_when_the_run_has_spent_its_budget(monkeypatch):
             "app.news.mailer", fromlist=["digest_page"]).digest_page(groups, dfrom, dto, **k))
     assert calls == ["Acme Solar"], "no retry pass after the budget"
     assert "Google News for 1 of 1 firms" in msg and "could not be searched" in sent["body"]
+
+
+@pytest.mark.asyncio
+async def test_a_source_that_refuses_for_twenty_minutes_is_given_up_for_the_run():
+    """Live: Google refused for 2.5 hours and the run sat out 15-minute pauses for its
+    last nine firms. Past the give-up time the source is reported, not waited for."""
+    from app.news.search import SourceGate
+    gate = SourceGate("Google News", 0.0, pause=0.01, max_pause=0.01)
+    gate.give_up_after = 0.05
+    gate.throttled(time_mod.monotonic())
+    await asyncio.sleep(0.06)
+    why = await gate.enter()
+    assert why and "long stretch" in why
+    fresh = SourceGate("Google News", 0.0, pause=0.01)
+    fresh.give_up_after = 0.05
+    fresh.throttled(time_mod.monotonic())
+    fresh.done(True)                                  # an answer in between resets it
+    await asyncio.sleep(0.06)
+    assert await fresh.enter() is None
+
+
+@pytest.mark.asyncio
+async def test_an_early_start_rearms_to_the_next_slot_not_the_same_one(tmp_path, monkeypatch):
+    """cipher-test, 16 Oct: the 01:30 digest started at 01:10, re-armed to "the next
+    slot from now" — 01:30 again — and ran a second time at 04:09."""
+    store = sched.ScheduleStore(str(tmp_path / "s.json"))
+    calls = []
+
+    async def runner(s, **kw):
+        calls.append(kw.get("send_at"))
+        return True, "Sent", 1, 1
+
+    monkeypatch.setattr(sched, "lead_seconds", lambda s: 3600)
+    due = sched.next_run("daily", (datetime.now(sched.desk_tz()) + timedelta(hours=1)).hour, 0)
+    task = asyncio.create_task(sched.scheduler_loop(store, runner, tick_seconds=0))
+    await asyncio.sleep(0.02)
+    store.add({"id": "S1", "tenant": "EVAM", "q": "Acme", "recipients": ["a@b.com"],
+               "cadence": "daily", "hour": datetime.fromtimestamp(due, sched.desk_tz()).hour,
+               "weekday": 0, "next_run": due, "active": True})
+    try:
+        while not calls:
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(0.1)
+        assert calls == [due], "started early, once, holding the email for its slot"
+        assert store.get("S1")["next_run"] >= due + 23 * 3600, "re-armed to tomorrow's slot"
+    finally:
+        task.cancel()
 
 
 def test_the_gate_slows_on_a_throttle_and_eases_back_after_a_clean_run():
@@ -1169,6 +1230,8 @@ def test_trading_name_sheds_the_suffixes_the_press_never_prints():
 def client(monkeypatch, tmp_path, stub_upstreams):
     monkeypatch.setenv("PULSE_SCHEDULE_FILE", str(tmp_path / "schedules.json"))
     monkeypatch.setenv("PULSE_SCHEDULER_ENABLED", "false")   # no loop inside a test
+    monkeypatch.setenv("PULSE_MONITOR_FILE", str(tmp_path / "monitor.json"))
+    monkeypatch.setenv("PULSE_MONITOR_ENABLED", "false")
     get_settings.cache_clear()
     with TestClient(create_app()) as c:
         yield c

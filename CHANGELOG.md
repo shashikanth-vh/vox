@@ -6,6 +6,94 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **News monitor: searched overnight, ready for the 7 AM digest.** The hourly batches now
+  start only between 00:00 and 06:00 on the desk's clock (`PULSE_DIGEST_TZ`, IST), so
+  the day's Google allowance is left to the desk and the system is quiet in working
+  hours. A pass is ~1,100 Google searches for ~500 firms; six batches of 300 cover it
+  with a retry hour to spare, and the last batch ends an hour before the 7 AM digest
+  reads what was filed. Each firm is due again after 20 h (was 12), so it is searched
+  once a night, never twice in one. "Scan all now", one firm's ↻ Scan and the history
+  pass still run whenever they are asked. The News Radar's monitor line says "searches
+  nightly 00:00–06:00", and its "next batch" is when the window opens.
+  *Operator:* `PULSE_MONITOR_HOURS=0-6` (START-END, wraps midnight as `22-5`; `all` =
+  the old all-day behaviour; a value that does not parse keeps `0-6` and logs
+  `pulse_monitor_hours_invalid`), `PULSE_MONITOR_REFRESH_HOURS=20`. Helm:
+  `pulse.monitor.hours`, `pulse.monitor.refreshHours`. Keep the digest's hour after the
+  window's end.
+
+- **News monitor: the book is searched all day, findings live in the Register, and
+  official records join the news.** Google allows a cloud host ~450 searches an hour, so
+  a digest that searched 500 firms and their directors in the hour before the email
+  hit that wall every morning; retries only decided how it waited. Now:
+  * *Searched a slice an hour.* PULSE's monitor wakes hourly and searches the firms
+    whose last COMPLETE search is oldest, within a Google budget (300/h, leaving room
+    for the desk), every firm again after 12 h. A firm whose search had a gap is not
+    marked searched and goes first next hour. "Scan all now" runs the same pass over
+    every firm in the background (`POST /v1/news/monitor/scan`), with progress on
+    `GET /v1/news/monitor`; one firm's ↻ Scan searches it server-side.
+  * *Fewer Google searches per firm.* Google takes OR: a firm's names are one query,
+    its key people one more (each with their city), plus one adverse-words query
+    (fraud, default, NCLT, SEBI, raid …) so a large firm's raid is not story 140.
+    Bing still gets one query per name (it answers OR with nothing).
+  * *Official sources.* SEBI's enforcement feed (orders, notices of demand,
+    attachment, recovery) and IBBI's public announcements (CIRP, liquidation,
+    voluntary liquidation, pre-pack), each read ONCE per batch for the whole book and
+    matched on the exact registered name (or a key person's full name for SEBI). They
+    cost no Google budget. MCA, NCLT/eCourts and NSE/BSE are named as not covered
+    (captcha / login / browser-session walls). "With insolvency history" pages back
+    through ~2,000 IBBI announcements.
+  * *Evidence, not just a colour.* Every adverse story carries what it asserts —
+    allegation / action taken / outcome, pending / final / appeal, the forum (SEBI,
+    ED, NCLT …), the amount (in crore when the unit is a rupee unit) and whether it
+    went the firm's way — read from the headline (said so) or the record.
+  * *In the Register.* Findings are `external-intelligence` rows (News / Regulatory),
+    each story once per firm (keyed on its normalised headline); the screen reads them
+    as the signed-in user, and Seen / Not relevant are the Register's shared
+    acknowledge / dismiss.
+  * *The digest reads them.* An all-firms schedule now sends from the monitor's
+    findings in seconds (5-minute lead), with the monitor's coverage: firms not
+    completely searched in the window are named with the source that failed them,
+    and an official source not read in a day is said too.
+  * *Linked firms.* A firm's card shows siblings in its promoter group, and firms
+    sharing a key person, that have adverse news of their own.
+  * *Promoters from the leads.* Key people were searched only where an analyst had
+    typed them (1 firm of 488 on cipher-test). A lead's contact is now searched too
+    when the designation is a leadership role (Director, MD, CEO, CFO, Founder,
+    Promoter, Chairman, Partner, Owner …) and the name has two words or more — and a
+    story about such a person is kept only if it also names the firm or the city. The
+    monitor line says for how many firms promoters are searched. `svc_pulse` may now
+    read `/v1/leads` (it keeps the name, designation and city only).
+  * *History.* IBBI's ~2,000 past announcements (about 19 months) are read once a day
+    automatically;
+    "🏛 Insolvency records" runs that check now (minutes, no Google). "📜 12-month
+    history" searches every firm and its promoters a year back (hours).
+  * *NSE filings.* Listed firms' adverse announcements — defaults, insolvency,
+    regulatory actions and orders, auditor and director resignations, pledges, and a
+    credit rating only when the filing says downgraded — read once per batch for the
+    whole book (the last 2 days; a fortnight once a day) and matched on the exact
+    registered name. Routine filings are not filed. Not covered, with the reason on
+    screen: MCA and BSE refuse servers; NCLT/eCourts search needs a captcha (insolvency
+    admissions come through IBBI). `PULSE_OFFICIAL_NSE=true`; PULSE needs outbound
+    HTTPS to `www.nseindia.com`.
+  * *Evidence reads a forum's act.* "NCLT … orders", "CBI registers case", "NCLT
+    appoints forensic auditor" are actions, not reports.
+  * *Precision, from the first live day.* A firm named by one common word ("Land",
+    "Pure", "Vikas") is not searched under it — it is a named gap until its news names
+    are set; "X Group" is searched whole, never as "X"; evidence forums match whole
+    words ("arbitrator" is not RBI).
+  * *Operator steps.* New settings (Compose base, defaults shown):
+    `PULSE_MONITOR_ENABLED=true`, `PULSE_MONITOR_FILE=/data/pulse/monitor.json`,
+    `PULSE_MONITOR_GOOGLE_PER_HOUR=300`, `PULSE_MONITOR_REFRESH_HOURS=12`,
+    `PULSE_OFFICIAL_SEBI=true`, `PULSE_OFFICIAL_IBBI=true` (also `PULSE_MONITOR_TENANTS`,
+    `PULSE_MONITOR_WINDOW_DAYS=30`, `PULSE_IBBI_PAGES=3`, `PULSE_IBBI_HISTORY_PAGES=100`,
+    `PULSE_MONITOR_ADVERSE_QUERY=true`). PULSE needs outbound HTTPS to `www.sebi.gov.in`
+    and `ibbi.gov.in`. Rebuild pulse, gateway (new routes gated as `run_news_scan`),
+    register (the `svc_pulse` read grant lives in evam-backend-core) and the UI.
+    `PULSE_MONITOR_HISTORY_DAYS=365` sets the history pass's reach. Helm: `pulse.monitor.enabled` (off by default — the chart has no persistent
+    volume; run one replica with it on). The first hour after deploy searches about 100
+    firms (2-3 Google searches each); "Scan all now" covers the rest at once (hours, at
+    Google's pace). `PULSE_MONITOR_ENABLED=false` restores the old searching digest.
+
 - **The news digest searches every firm: a source that says "slow down" is waited for,
   not reported missing.** The 14 Oct production digest said "Google News could not be
   searched for 335 of 525 firms (HTTP 503)". Measured from cipher-test: the 503 is
@@ -33,6 +121,15 @@ bundle, or just check that the newest item below is present in your copy).
     the pause from 60 s to 15 min in under three minutes). Retry passes stop once a run
     has searched for 45 minutes, so a source that is down for the morning is reported,
     not chased for hours.
+  * *Google's real limit, and a run that ends.* The 16 Oct run on cipher-test searched
+    ~460 firms in 19 minutes at 2.5 s and was then refused for 2.5 hours: Google allows a
+    cloud host roughly 450-500 searches in about an hour, whatever the spacing. Google
+    is paced at 9 s now (~400 an hour; a 500-firm digest ~75 minutes, started that much
+    early — default lead 90 minutes until history exists). A source refusing every
+    request for 20 minutes is given up for the rest of the run and reported per firm.
+  * *One run per slot.* An early start re-armed the schedule to "the next slot from
+    now", which was the same slot, and the digest ran a second time (01:10 and 04:09).
+    It now re-arms to the slot after the one just run.
   * *Email that is not configured is not retried.* The retry loop re-ran the whole
     all-firms search three more times for it (cipher-test, 15 Oct: four Google sweeps in
     40 minutes); it is now recorded once as "not retried: fix the setting first".

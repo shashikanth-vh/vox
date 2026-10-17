@@ -85,9 +85,11 @@ _RAW: list[tuple[str, str, str]] = [
     # digest to any address, or leave a recurring one pointed there. Searching is
     # harmless; sending mail as the firm is not, and both live behind the operation the
     # matrix already grants for exactly this feature.
-    ("GET",    r"^/pulse/v1/news/(search|config|schedules)$", "run_news_scan"),
+    ("GET",    r"^/pulse/v1/news/(search|config|schedules|monitor)$", "run_news_scan"),
     ("POST",   r"^/pulse/v1/news/(email|email-digest|email-test)$", "run_news_scan"),
     ("POST",   r"^/pulse/v1/news/schedules(/(delete|run|update))?$", "run_news_scan"),
+    # The monitor: its coverage, and "Scan all now" / one firm's scan.
+    ("POST",   r"^/pulse/v1/news/monitor/scan$", "run_news_scan"),
     # DocRAG — uploaded documents (KYC, CIBIL consents, sanction letters) are the same
     # material the Data Register's document routes guard, so every data route — upload,
     # delete, read, and query (which returns document text) — needs the document grant.

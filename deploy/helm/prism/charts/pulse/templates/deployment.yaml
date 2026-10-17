@@ -45,6 +45,22 @@ spec:
               value: {{ .Values.config.sources | quote }}
             - name: PULSE_API_KEYS
               value: {{ .Values.config.apiKeys | quote }}
+            - name: PULSE_MONITOR_ENABLED
+              value: {{ .Values.monitor.enabled | quote }}
+            - name: PULSE_MONITOR_FILE
+              value: "/tmp/pulse/monitor.json"
+            - name: PULSE_MONITOR_GOOGLE_PER_HOUR
+              value: {{ .Values.monitor.googlePerHour | quote }}
+            - name: PULSE_MONITOR_HOURS
+              value: {{ .Values.monitor.hours | quote }}
+            - name: PULSE_MONITOR_REFRESH_HOURS
+              value: {{ .Values.monitor.refreshHours | quote }}
+            - name: PULSE_OFFICIAL_SEBI
+              value: {{ .Values.monitor.sebi | quote }}
+            - name: PULSE_OFFICIAL_IBBI
+              value: {{ .Values.monitor.ibbi | quote }}
+            - name: PULSE_OFFICIAL_NSE
+              value: {{ .Values.monitor.nse | quote }}
             - name: PULSE_REGISTER_API_KEY
               valueFrom:
                 secretKeyRef:

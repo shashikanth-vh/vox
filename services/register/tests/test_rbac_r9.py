@@ -65,6 +65,9 @@ async def test_svc_pulse_own_key_read_is_scoped(client: AsyncClient, _svc_and_si
     # /v1/entities is on svc_pulse's read allowlist → own-key read allowed.
     ents = await client.get("/v1/entities", headers={"X-API-Key": PULSE_KEY})
     assert ents.status_code == 200, ents.text
+    # /v1/leads too: their contacts name the promoters the news monitor searches.
+    leads = await client.get("/v1/leads", headers={"X-API-Key": PULSE_KEY})
+    assert leads.status_code == 200, leads.text
     # /v1/deals is NOT → own-key read denied (no more tenant-wide read of every table).
     deals = await client.get("/v1/deals", headers={"X-API-Key": PULSE_KEY})
     assert deals.status_code == 403, deals.text

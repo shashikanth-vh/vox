@@ -458,6 +458,16 @@ services:
       # container's UTC. Override for a desk in another zone.
       PULSE_DIGEST_TZ: "${PULSE_DIGEST_TZ:-Asia/Kolkata}"
       PULSE_SCHEDULER_ENABLED: "${PULSE_SCHEDULER_ENABLED:-true}"
+      # The monitor: the book searched a slice an hour, findings filed in the Register,
+      # the all-firms digest reading them. Its memory lives on the same volume.
+      PULSE_MONITOR_ENABLED: "${PULSE_MONITOR_ENABLED:-true}"
+      PULSE_MONITOR_FILE: "/data/pulse/monitor.json"
+      PULSE_MONITOR_GOOGLE_PER_HOUR: "${PULSE_MONITOR_GOOGLE_PER_HOUR:-300}"
+      PULSE_MONITOR_HOURS: "${PULSE_MONITOR_HOURS:-0-6}"
+      PULSE_MONITOR_REFRESH_HOURS: "${PULSE_MONITOR_REFRESH_HOURS:-20}"
+      PULSE_OFFICIAL_SEBI: "${PULSE_OFFICIAL_SEBI:-true}"
+      PULSE_OFFICIAL_IBBI: "${PULSE_OFFICIAL_IBBI:-true}"
+      PULSE_OFFICIAL_NSE: "${PULSE_OFFICIAL_NSE:-true}"
     volumes:
       - pulsedata:/data/pulse
     # No host port: PULSE is reachable ONLY through the gateway (edge → /pulse/...).

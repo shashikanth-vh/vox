@@ -1,8 +1,9 @@
 import { db, nowStamp, today } from '../api/atlasStore';
 import { writeAudit } from './auditService';
-import { PULSE_URL } from '../api/axiosClient';
+import { PULSE_URL, USE_REAL_API } from '../api/axiosClient';
 import { authHeaders } from '../auth/session';
 import { entitiesService } from './entitiesService';
+import { api, nextCursorOf } from '../api/http';
 
 // Port of v12 AUGMENT 16 — India News Radar. Every item stored here is a REAL
 // article scraped live from GDELT; when a source is unreachable the scan reports
@@ -10,11 +11,20 @@ import { entitiesService } from './entitiesService';
 
 export type Severity = 'RED' | 'AMBER' | 'GREEN' | 'BLUE';
 
+/** What a story asserts (PULSE's evidence.py): an allegation is not an order. */
+export interface Evidence {
+  nature?: string; stage?: string; forums?: string[]; amount?: string;
+  amount_cr?: number | null; favourable?: boolean; basis?: string;
+}
+
 export interface NewsItem {
   id: string; code: string; term: string;
   headline: string; url: string; source: string; when: string;
   severity: Severity; category: string; reason?: string; mode: string;
   verdict: string | null; at: string;
+  /** Monitor findings only: the Register row, so Seen / Not relevant is shared. */
+  intelId?: string; about?: string; evidence?: Evidence; official?: boolean;
+  acknowledged?: boolean;
 }
 
 export interface Article {
@@ -453,6 +463,179 @@ async function refreshFirms(): Promise<void> {
     // borrower was filed as good news instead of raising the ⚠ review flag.
     await Promise.all([clientsService.hydrateAll(), lendingService.hydrateAll()]);
   } catch { /* offline / mock mode: keep whatever the store already holds */ }
+}
+
+/* ================= THE MONITOR =================
+   PULSE searches the book a slice an hour, overnight, and files what it finds in the
+   Register (external-intelligence: News, and Regulatory for SEBI / IBBI records). The
+   screen READS those findings from the Register as the signed-in user — the Register's
+   RBAC decides what this desk sees — and asks PULSE only for the monitor's coverage
+   and to scan now. */
+
+export interface MonitorStatus {
+  enabled: boolean; firms: number; searched_fresh: number; searched_24h: number;
+  never_searched: number; refresh_hours: number; google_per_hour: number;
+  hours?: string | null;   // when batches run, desk time ("00:00–06:00"); absent = all day
+  next_batch: number | null;
+  run: { kind?: string; running?: boolean; started?: number; finished?: number;
+         done?: number; total?: number; filed?: number; note?: string };
+  gaps: { id: string; name: string; last_ok: number | null; down: Record<string, string> }[];
+  gap_count: number;
+  official: Record<string, { at: number; ok: boolean; detail: string; matched?: number }>;
+  not_covered: Record<string, string>;
+  /** Whose promoters / directors are searched, and how many came from leads. */
+  people?: { firms_with_people: number; from_leads: number; people: number };
+}
+
+const SEV_OF_SERVER: Record<string, Severity> = { UGLY: 'RED', BAD: 'AMBER', GOOD: 'GREEN', POLICY: 'BLUE' };
+const SIGNALS = new Set(['RED', 'AMBER', 'GREEN', 'BLUE']);
+
+/** entity id -> client code, from the roster the screen already holds. */
+function codeOfEntity(): Map<string, string> {
+  const out = new Map<string, string>();
+  Object.entries(db().clients || {}).forEach(([code, c]: [string, any]) => {
+    if (c?.entityId) out.set(String(c.entityId), code);
+  });
+  return out;
+}
+
+function findingOf(row: any, code: string): NewsItem {
+  const p = row?.payload || {};
+  const stored: Severity = SEV_OF_SERVER[p.severity]
+    || (SIGNALS.has(row?.signal) ? row.signal : 'AMBER');
+  // Polarity is ours to judge, not the monitor's: it filed without knowing the book, so
+  // good-looking news on a live borrower is re-read as the review flag it is.
+  const live = isLiveBorrower(code);
+  const [sev, cat] = live && stored === 'GREEN' ? classify(row?.title || '', true)
+    : [stored, p.category || 'neutral'];
+  const why = cat === 'context-review' ? contextReason(row?.title || '') : (p.reason || '');
+  const official = row?.intel_type === 'Regulatory';
+  return {
+    id: 'I-' + row.id, intelId: String(row.id), code,
+    term: p.about || p.matched || '', about: p.about || undefined,
+    headline: row?.title || '', url: row?.url || '',
+    source: p.publisher || String(row?.source || '').replace(/^PULSE:/, ''),
+    when: p.when || String(row?.observed_at || '').slice(0, 10).replace(/-/g, ''),
+    severity: sev, category: cat, ...(why ? { reason: why } : {}),
+    mode: official ? 'official' : 'monitor', verdict: null,
+    at: String(row?.created_at || '').slice(0, 16).replace('T', ' '),
+    evidence: p.evidence || undefined, official,
+    acknowledged: Boolean(row?.acknowledged_at),
+  };
+}
+
+export const monitorService = {
+  /** The monitor's findings for the last `days`, newest first, dismissed ones left out. */
+  async findings(days: number): Promise<NewsItem[]> {
+    if (!USE_REAL_API) return [];        // the offline build has no Register to read
+    await refreshFirms();
+    const codes = codeOfEntity();
+    const since = Date.now() - days * 86400_000;
+    const out: NewsItem[] = [];
+    for (const intel_type of ['News', 'Regulatory']) {
+      let cursor: string | undefined;
+      // Newest first; stop at the first row older than the window, so a long history
+      // is never read whole for a 30-day view.
+      do {
+        const page: any = await api.get<any>('/external-intelligence', {
+          intel_type, limit: 200, ...(cursor ? { cursor } : {}) });
+        const rows: any[] = page?.items ?? page?.data ?? (Array.isArray(page) ? page : []);
+        let older = false;
+        for (const row of rows) {
+          if (row?.created_at && Date.parse(row.created_at) < since) { older = true; break; }
+          if (row?.is_dismissed || !row?.payload?.monitor) continue;
+          const code = codes.get(String(row.entity_id));
+          if (code) out.push(findingOf(row, code));
+        }
+        cursor = older ? undefined : (nextCursorOf(page) || undefined);
+      } while (cursor);
+    }
+    return out;
+  },
+
+  async status(): Promise<MonitorStatus> {
+    const r = await fetch(PULSE_URL + '/v1/news/monitor', { headers: pulseHeaders() });
+    const j = await r.json().catch(() => null);
+    if (!r.ok || !j) throw new Error('HTTP ' + r.status + (detailOf(j) ? ' — ' + detailOf(j) : ''));
+    return j;
+  },
+
+  /** In the background: every firm now ('all'), every firm 12 months back with the
+   *  official records' history ('history'), or the official records' history alone —
+   *  minutes, no news search ('official'). */
+  async scanAll(by: string, mode: 'all' | 'history' | 'official' = 'all'): Promise<{ ok: boolean; message: string }> {
+    const body = mode === 'official' ? { scope: 'official' }
+      : { scope: 'all', history: mode === 'history' };
+    const r = await fetch(PULSE_URL + '/v1/news/monitor/scan', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...pulseHeaders() },
+      body: JSON.stringify(body),
+    });
+    const j = await r.json().catch(() => null);
+    writeAudit(by, 'News scan', 'ALL', { all: 'scan all now', history: '12-month history',
+      official: 'official records history' }[mode]);
+    return { ok: r.ok, message: j?.message || detailOf(j) || ('HTTP ' + r.status) };
+  },
+
+  /** One firm, now. Waits up to 50 s; a paced Google can take longer, and then says so. */
+  async scanFirm(code: string, by: string): Promise<{ ok: boolean; message: string }> {
+    const entityId = (db().clients as any)?.[code]?.entityId;
+    if (!entityId) return { ok: false, message: 'This firm is not on the Register yet.' };
+    const r = await fetch(PULSE_URL + '/v1/news/monitor/scan', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...pulseHeaders() },
+      body: JSON.stringify({ scope: 'firm', entity_id: entityId }),
+    });
+    const j = await r.json().catch(() => null);
+    writeAudit(by, 'News scan', code, j?.done ? `${j.filed} new` : 'scan started');
+    return { ok: r.ok, message: j?.done ? `${j.filed} new finding${j.filed === 1 ? '' : 's'}`
+      : (j?.message || detailOf(j) || ('HTTP ' + r.status)) };
+  },
+
+  /** Shared triage, in the Register: everyone sees that it was read, or set aside. */
+  async acknowledge(n: NewsItem, by: string): Promise<void> {
+    if (!n.intelId) return;
+    await api.post(`/external-intelligence/${n.intelId}/acknowledge`, {});
+    writeAudit(by, 'News verdict', n.code, `seen — ${n.headline.slice(0, 70)}`);
+  },
+  async dismiss(n: NewsItem, by: string): Promise<void> {
+    if (!n.intelId) return;
+    await api.post(`/external-intelligence/${n.intelId}/dismiss`, {});
+    writeAudit(by, 'News verdict', n.code, `not relevant — ${n.headline.slice(0, 70)}`);
+  },
+};
+
+/* LINKED FIRMS — the network, from what the Register already holds: firms sharing a
+   promoter group, and firms sharing a key person. A fraud case at a group company is
+   news about its siblings even when they are never named. */
+export function linkedFirms(code: string): { code: string; why: string }[] {
+  const all = db().clients as Record<string, any>;
+  const me = all?.[code];
+  if (!me) return [];
+  const norm = (s: string) => String(s || '').toLowerCase().replace(/[^a-z ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const mine = new Set((me.keyPeople || []).map((p: any) => norm(p?.name))
+    .filter((n: string) => n.split(' ').length >= 2));
+  const out: { code: string; why: string }[] = [];
+  Object.entries(all).forEach(([other, c]) => {
+    if (other === code) return;
+    if (me.promoterGroup && c?.promoterGroup === me.promoterGroup) {
+      out.push({ code: other, why: 'same promoter group' }); return;
+    }
+    const shared = (c?.keyPeople || []).map((p: any) => p?.name)
+      .find((n: string) => mine.has(norm(n)));
+    if (shared) out.push({ code: other, why: `shares ${shared}` });
+  });
+  return out;
+}
+
+/** "Allegation · pending · SEBI · Rs 120 crore" — what the story asserts. */
+export function evidenceText(ev?: Evidence): string {
+  if (!ev || !ev.nature) return '';
+  const nature: Record<string, string> = { allegation: 'Allegation', action: 'Action taken', outcome: 'Outcome', report: 'Report' };
+  const bits = [(ev.basis === 'official record' ? 'Official record — ' : '') + (nature[ev.nature] || ev.nature)];
+  if (ev.favourable) bits.push("in the firm's favour");
+  else if (ev.stage && ev.stage !== 'unknown') bits.push(ev.stage);
+  bits.push(...(ev.forums || []).slice(0, 2));
+  if (ev.amount) bits.push(ev.amount);
+  return bits.filter(Boolean).join(' · ');
 }
 
 export const newsService = {

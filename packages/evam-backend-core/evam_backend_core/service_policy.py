@@ -49,7 +49,9 @@ SERVICE_GRANTS: dict[str, set[str]] = {
 #   * svc_atlas: EMPTY — a pure BFF must always delegate (forward the user's context); its
 #     own key never reads the data plane.
 #   * svc_vox: the interaction/company-resolution context it needs to file captures.
-#   * svc_pulse: the intelligence context it matches against and writes.
+#   * svc_pulse: the intelligence context it matches against and writes, and the leads
+#     whose contacts name a firm's promoters and directors (the news monitor searches
+#     them; it keeps only the name, the designation and the city).
 #   * svc_workflows: the deal/lead subjects a conversion workflow reads.
 SERVICE_READ_GRANTS: dict[str, set[str]] = {
     "svc_atlas": set(),
@@ -60,7 +62,7 @@ SERVICE_READ_GRANTS: dict[str, set[str]] = {
     # log_to target). Read-only corpus context — the write is still only log_interaction.
     "svc_vox": {"/v1/entities", "/v1/leads", "/v1/people", "/v1/interactions",
                 "/v1/deals", "/v1/lending", "/v1/syndication", "/v1/asset-monetisation"},
-    "svc_pulse": {"/v1/entities", "/v1/external-intelligence"},
+    "svc_pulse": {"/v1/entities", "/v1/external-intelligence", "/v1/leads"},
     "svc_workflows": {"/v1/entities", "/v1/leads", "/v1/deals", "/v1/lending",
                       "/v1/syndication", "/v1/asset-monetisation"},
     # Chitti — the chatbot VM — answers questions about anything in the book,

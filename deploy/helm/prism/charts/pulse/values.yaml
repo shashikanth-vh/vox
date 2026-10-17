@@ -35,6 +35,20 @@ scan:
   schedule: "30 1 * * *"
   tenants: [EVAM]
 
+# The news monitor (searches the book a slice an hour overnight, files findings in the
+# Register). hours: when batches may start, desk time ("0-6"; "all" = all day).
+# Off by default here: this chart mounts no persistent volume, so its memory lives in
+# the /tmp emptyDir and is lost on a restart (every firm is then due again — slower,
+# never wrong). Run ONE replica with it on: two would each spend Google's allowance.
+monitor:
+  enabled: false
+  googlePerHour: 300
+  hours: "0-6"
+  refreshHours: 20
+  sebi: true
+  ibbi: true
+  nse: true
+
 service:
   type: ClusterIP
   port: 80

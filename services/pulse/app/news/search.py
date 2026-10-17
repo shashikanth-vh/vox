@@ -212,13 +212,25 @@ class SourceGate:
         self._broken_until = 0.0     # real failures: skip until then
         self._throttled_until = 0.0  # a throttle: wait until then
         self._last_throttle = -1.0   # when the last throttle was taken (monotonic)
+        self._refusing_since: float | None = None  # first throttle with no success since
+        self.give_up_after = GIVE_UP_AFTER_S
         self.throttles = 0
+        # Requests let through, ever: the monitor reads it before and after a batch to
+        # spend Google's hourly allowance by measurement, not by estimate.
+        self.sent = 0
 
     async def enter(self, max_wait: float | None = None) -> str | None:
         now = time.monotonic()
+        if (self._refusing_since is not None
+                and now - self._refusing_since > self.give_up_after):
+            # Refusing for longer than any pause should take: stop waiting on it.
+            self._broken_until = now + self.give_up_after
+            self._refusing_since = None
+            log.warning("pulse_source_given_up", extra={"source": self.name,
+                                                       "seconds": self.give_up_after})
         if now < self._broken_until:
-            return (f"paused after {self.trip_after} failures in a row; "
-                    f"tried again in {int(self._broken_until - now) // 60 + 1} min")
+            return (f"refusing or failing for a long stretch; tried again in "
+                    f"{int(self._broken_until - now) // 60 + 1} min")
         slot = max(now, self._next, self._throttled_until)
         if max_wait is not None and slot - now > max_wait:
             if now < self._throttled_until:
@@ -236,6 +248,7 @@ class SourceGate:
             if max_wait is not None:
                 return "asking too fast for it right now; not asked for this search"
             await asyncio.sleep(wait)
+        self.sent += 1
         return None
 
     def throttled(self, sent_at: float | None = None) -> float:
@@ -250,6 +263,8 @@ class SourceGate:
             return max(0.0, self._throttled_until - time.monotonic())
         self.throttles += 1
         self._last_throttle = time.monotonic()
+        if self._refusing_since is None:
+            self._refusing_since = self._last_throttle
         pause = self._pause
         self._throttled_until = max(self._throttled_until, time.monotonic() + pause)
         self._pause = min(self._pause * 2, self.max_pause)
@@ -262,6 +277,7 @@ class SourceGate:
     def done(self, ok: bool) -> None:
         if ok:
             self._fails = 0
+            self._refusing_since = None
             self._wins += 1
             if self._wins >= 25:
                 self._wins = 0
@@ -276,15 +292,21 @@ class SourceGate:
                                                      "seconds": self.cooldown})
 
 
-# Request spacing per source, in seconds. Google News: 2.5 s measured clean for 150
-# searches in a row from a cloud host (1.5 s was blocked after ~190); it widens itself
-# when throttled. GDELT publishes its limit (one per 5 s) and is not used for bulk.
-GOOGLE_INTERVAL_S = 2.5
+# Request spacing per source, in seconds. Google News limits a cloud host to roughly
+# 450-500 searches in about an hour, whatever the spacing (cipher-test: 2.5 s ran clean
+# for ~460 searches, then refused; 1.5 s in production was refused after ~190). 9 s is
+# ~400 an hour: a 500-firm digest takes ~75 minutes and the scheduler starts it that
+# much early. GDELT publishes its limit (one per 5 s) and is not used for bulk.
+GOOGLE_INTERVAL_S = 9.0
 BING_INTERVAL_S = 0.25
 GDELT_INTERVAL_S = 5.5
 # How many times a bulk search retries a throttled source before reporting it. With the
 # pause doubling from 60 s, five retries span ~30 minutes of the source saying "wait".
 THROTTLE_RETRIES = 5
+# A source that has refused every request for this long is given up on for the rest of
+# the run (reported per firm) — live, Google refused for 2.5 hours straight and the run
+# sat out fifteen-minute pauses for the last nine firms.
+GIVE_UP_AFTER_S = 20 * 60
 # The screen sweep asks in batches the browser waits up to 5 minutes for: two retries
 # (pauses of 60 s and 120 s) keep a throttled batch inside that.
 SWEEP_THROTTLE_RETRIES = 2
@@ -292,6 +314,49 @@ SWEEP_THROTTLE_RETRIES = 2
 
 def _skipped(name: str, why: str) -> dict[str, Any]:
     return {"name": name, "ok": False, "count": 0, "error": why, "skipped": True}
+
+
+# The words an adverse search adds to a firm's names. Google answers a name with its
+# hundred most RELEVANT stories, and for a large firm those are results and orders —
+# the one about the raid is story 140. Asked alongside these, it is story 1.
+ADVERSE_TERMS = ("fraud OR default OR insolvency OR NCLT OR SEBI OR raid OR arrest OR "
+                 "probe OR penalty OR scam OR ED OR CBI OR lawsuit OR liquidation")
+# Names per Google OR query: a firm's people go in one query, not one each, and a URL
+# that long still stays far inside what Google accepts.
+GOOGLE_OR_CHUNK = 8
+
+
+def strict_queries(wanted: list[str], context_of: dict[str, str] | None = None,
+                   adverse: bool = False) -> tuple[list[str], list[str]]:
+    """(Google queries, Bing queries) for a NAME search.
+
+    GOOGLE TAKES OR, so a firm's names — or its people — are one query: Google allows a
+    cloud host ~450 searches an hour, and a firm searched under three names cost three
+    of them. BING ANSWERS ZERO to any query with OR in it (checked live: '"Enerparc
+    Energy" OR "Enerparc"' -> 0 items, '"Enerparc"' -> 14), so Bing keeps one per name;
+    Bing has no such budget. Either way a name containing another adds nothing — every
+    article printing "Enerparc Energy" prints "Enerparc" — so only the shortest forms
+    are asked. ``context_of`` (a person's city) narrows a common name on both."""
+    ctx = context_of or {}
+    low = [w.lower() for w in wanted]
+    short = [w for i, w in enumerate(wanted)
+             if not any(j != i and low[j] in low[i] and (low[j] != low[i] or j < i)
+                        for j in range(len(wanted)))]
+    bing = [f'"{w}"' + (f" {ctx[w]}" if ctx.get(w) else "") for w in short]
+    google: list[str] = []
+    for i in range(0, len(short), GOOGLE_OR_CHUNK):
+        chunk = short[i:i + GOOGLE_OR_CHUNK]
+        parts = [f'"{w}" {ctx[w]}' if ctx.get(w) else f'"{w}"' for w in chunk]
+        if len(parts) == 1:
+            google.append(parts[0])
+        else:
+            # A name with its city is grouped, so OR binds the pairs, not the words.
+            google.append(" OR ".join(f"({p})" if ctx.get(w) else p
+                                      for p, w in zip(parts, chunk, strict=True)))
+        if adverse:
+            names = " OR ".join(f'"{w}"' for w in chunk)
+            google.append(f"({names}) ({ADVERSE_TERMS})")
+    return google, bing
 
 
 class NewsSearch:
@@ -327,6 +392,14 @@ class NewsSearch:
         # to happen after the patch, not before it.
         self._client: httpx.AsyncClient | None = None
         self._client_lock = asyncio.Lock()
+
+    def sent(self, source: str) -> int:
+        """Requests ``source`` has been sent by this process (see SourceGate.sent)."""
+        return self._gates[source].sent
+
+    async def http(self) -> httpx.AsyncClient:
+        """The shared pool, for the official-source fetches that ride along with it."""
+        return await self._http()
 
     async def _http(self) -> httpx.AsyncClient:
         if self._client is None:
@@ -475,32 +548,32 @@ class NewsSearch:
     async def _fetch_merge(self, term: str, dfrom: str, dto: str, limit: int,
                            strict: bool = False, context: str = "",
                            names: list[str] | None = None, bulk: bool = False,
-                           retries: int | None = None,
+                           retries: int | None = None, adverse: bool = False,
+                           contexts: dict[str, str] | None = None,
                            ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """``bulk`` (a sweep or a digest — many terms in a row) asks GDELT only when it
         has a free slot rather than queueing every term behind its 5-second limit.
 
         ``strict`` is how a NAME is searched (a firm, a director) as opposed to a
         topic: each of the firm's names (``names``, the term when absent — see names.py)
-        is searched in quotes on its own; ``context`` (a city) rides along unquoted to narrow a
-        common name; and only articles that print one of the names, inside the window,
-        are kept. A topic search ("solar tariff") stays loose."""
+        is quoted; ``context`` (a city) rides along unquoted to narrow a common name —
+        or ``contexts``, one per name, for a firm's people asked together; and only
+        articles that print one of the names, inside the window, are kept. Google gets
+        the names in one OR query, Bing one query each (see ``strict_queries``);
+        ``adverse`` adds a Google query of the names with the adverse words. A topic
+        search ("solar tariff") stays loose."""
         client = await self._http()
         wanted = [n for n in (names or [term]) if n.strip()] or [term]
-        ctx = f" {context}" if context else ""
         if not strict:
-            queries = [term]
+            g_queries = b_queries = [term]
         else:
-            # Bing answers ZERO results to any query with OR in it (checked live: '"Enerparc
-            # Energy" OR "Enerparc"' -> 0 items, '"Enerparc"' -> 14), so each name is its
-            # own query. A name containing another adds nothing — every article printing
-            # "Enerparc Energy" prints "Enerparc" — so only the shortest forms are asked.
-            low = [w.lower() for w in wanted]
-            queries = [f'"{w}"{ctx}' for i, w in enumerate(wanted)
-                       if not any(j != i and low[j] in low[i] and (low[j] != low[i] or j < i)
-                                  for j in range(len(wanted)))]
+            ctx_of = dict(contexts or {})
+            if context:
+                ctx_of = {w: ctx_of.get(w) or context for w in wanted}
+            g_queries, b_queries = strict_queries(wanted, ctx_of, adverse)
 
-        async def each(fetch: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        async def each(fetch: Any, queries: list[str],
+                       ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
             """One source over every query: the items merged, and the source counted as
             searched if any query reached it (else the first failure is its status)."""
             got = await asyncio.gather(*(fetch(client, q, dfrom, dto, patient=bulk or strict,
@@ -518,7 +591,7 @@ class NewsSearch:
             return await self._gdelt(client, term, dfrom, dto, "")
 
         (google, s_google), (gdelt, s_gdelt), (bing, s_bing) = await asyncio.gather(
-            each(self._google), gdelt_call(), each(self._bing))
+            each(self._google, g_queries), gdelt_call(), each(self._bing, b_queries))
         sources = [s_google, s_gdelt, s_bing]
         log.info("pulse_search_sources", extra={"term": term, "google": len(google),
                                                 "gdelt": len(gdelt), "bing": len(bing),
@@ -571,7 +644,8 @@ class NewsSearch:
                             limit: int = 40, live: bool = False, *,
                             strict: bool = False, context: str = "",
                             names: list[str] | None = None, bulk: bool = False,
-                            retries: int | None = None,
+                            retries: int | None = None, adverse: bool = False,
+                            contexts: dict[str, str] | None = None,
                             ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """Articles AND how each source fared.
 
@@ -584,6 +658,8 @@ class NewsSearch:
         context = (context or "").strip()
         key = (f"{term.lower()}|{dfrom or ''}|{dto or ''}"
                + (f"|strict|{context.lower()}|{'|'.join(names or []).lower()}"
+                  f"|{'adverse' if adverse else ''}"
+                  f"|{'|'.join(f'{k}={v}' for k, v in sorted((contexts or {}).items()))}"
                   if strict else ""))
         hit = self._cache.get(key)
         if hit and time.time() - hit[0] < self.cache_ttl_s:
@@ -599,7 +675,8 @@ class NewsSearch:
         self._inflight[key] = fut
         try:
             merged, sources = await self._fetch_merge(term, dfrom, dto, limit,
-                                                      strict, context, names, bulk, retries)
+                                                      strict, context, names, bulk, retries,
+                                                      adverse, contexts)
             # Only a COMPLETE answer is worth remembering. Cache a total outage and the
             # radar stays blind long after the network is back; cache a partial one
             # (Google throttled, Bing fine) and a digest's retry pass gets the same gap

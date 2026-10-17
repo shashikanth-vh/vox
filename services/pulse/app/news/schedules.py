@@ -397,9 +397,14 @@ async def run_schedule(schedule: dict[str, Any], *, search: Callable, send: Call
                        already_sent: set[str] | None = None,
                        on_sent: Callable[[list[str]], None] | None = None,
                        send_at: float | None = None,
+                       stored: Callable | None = None,
                        ) -> tuple[bool, str, int, int]:
     """Search every term on the schedule, then email one digest. Firms with nothing to
     report are LEFT OUT rather than listed as empty — a digest of silence is noise.
+
+    ``stored`` (an async ``(dfrom, dto) -> (pairs, coverage)``): when given, an
+    all-firms schedule reads the monitor's findings instead of searching (see
+    monitor.py) — ``pairs`` is (firm name, articles) per firm.
 
     An all-firms schedule covers the register AS OF SEND TIME: ``firm_terms`` (an async
     callable answering the current firms, each a name or ``{name, aliases, people,
@@ -448,13 +453,24 @@ async def run_schedule(schedule: dict[str, Any], *, search: Callable, send: Call
                                               "to": dto, "adverse_only": adverse_only,
                                               "only_new": only_new})
     t0 = time.time()
+    retried = 0
+    if schedule.get("scope") == "all-firms" and stored is not None:
+        # THE MONITOR HAS ALREADY SEARCHED. Its findings are in the Register, filed
+        # over the day; the digest reads them rather than asking Google for five
+        # hundred firms in the hour before the email. Coverage is the monitor's: which
+        # firms it could not completely search in the window, and why.
+        pairs, coverage = await stored(dfrom, dto)
+        schedule["_search_seconds"] = round(time.time() - t0, 1)
+        return await _send_digest(schedule, pairs, coverage, send=send, digest=digest,
+                                  before=before, on_sent=on_sent, send_at=send_at,
+                                  dfrom=dfrom, dto=dto, adverse_only=adverse_only,
+                                  t0=t0, retried=0)
     gate = asyncio.Semaphore(DIGEST_CONCURRENCY)
     found = list(await asyncio.gather(*(_search_firm(w, search, dfrom, dto, gate)
                                         for w in watches)))
     # NO FIRM LEFT BEHIND: a firm whose search had a gap (a source throttled past its
     # retries, a timeout) is searched again, up to RETRY_PASSES more times, before the
     # email goes out. Only what is still missing after that is reported as such.
-    retried = 0
     for _ in range(RETRY_PASSES):
         gaps = [i for i, (_, down) in enumerate(found) if down]
         if not gaps:
@@ -473,11 +489,6 @@ async def run_schedule(schedule: dict[str, Any], *, search: Callable, send: Call
             found[i] = res
     # The search time (not the hold below) is what the next lead time is learnt from.
     schedule["_search_seconds"] = round(time.time() - t0, 1)
-    if send_at is not None and send_at > time.time():
-        # Searched early so the email lands at the scheduled minute, not after the run.
-        await asyncio.sleep(send_at - time.time())
-    groups: list[tuple[str, list[dict[str, Any]]]] = []
-    repeats = 0
     # Which sources were not searched, for how many firms, and why (first reason seen).
     down_count: dict[str, int] = {}
     down_why: dict[str, str] = {}
@@ -486,13 +497,35 @@ async def run_schedule(schedule: dict[str, Any], *, search: Callable, send: Call
             down_count[src] = down_count.get(src, 0) + 1
             down_why.setdefault(src, why)
     coverage = {"firms": len(watches), "down": down_count, "why": down_why}
-    for w, (arts, _) in zip(watches, found, strict=True):
+    pairs = [(w.name, arts) for w, (arts, _) in zip(watches, found, strict=True)]
+    return await _send_digest(schedule, pairs, coverage, send=send, digest=digest,
+                              before=before, on_sent=on_sent, send_at=send_at,
+                              dfrom=dfrom, dto=dto, adverse_only=adverse_only,
+                              t0=t0, retried=retried)
+
+
+async def _send_digest(schedule: dict[str, Any],
+                       pairs: list[tuple[str, list[dict[str, Any]]]],
+                       coverage: dict[str, Any], *, send: Callable, digest: Callable,
+                       before: set[str], on_sent: Callable[[list[str]], None] | None,
+                       send_at: float | None, dfrom: str, dto: str, adverse_only: bool,
+                       t0: float, retried: int) -> tuple[bool, str, int, int]:
+    """Filter what was found (adverse only, only new), compose and send — the same for
+    a digest that searched and one that read the monitor's findings."""
+    if send_at is not None and send_at > time.time():
+        # Searched early so the email lands at the scheduled minute, not after the run.
+        await asyncio.sleep(send_at - time.time())
+    groups: list[tuple[str, list[dict[str, Any]]]] = []
+    repeats = 0
+    down_count: dict[str, int] = coverage.get("down") or {}
+    n_firms = int(coverage.get("firms") or len(pairs))
+    for name, arts in pairs:
         if adverse_only:
             arts = [a for a in arts if a.get("severity") in ("UGLY", "BAD")]
         fresh_arts = [a for a in arts if story_key(a) not in before]
         repeats += len(arts) - len(fresh_arts)
         if fresh_arts:
-            groups.append((w.name, fresh_arts))
+            groups.append((name, fresh_arts))
     groups = merge_shared(groups)
     total = sum(len(a) for _, a in groups)
 
@@ -515,16 +548,16 @@ async def run_schedule(schedule: dict[str, Any], *, search: Callable, send: Call
                                            "retried_firms": retried,
                                            "sources_down": down_count, "result": msg})
     if not down_count:
-        msg += f" — all {len(watches)} firms searched on every source"
+        msg += f" — all {n_firms} firms searched on every source"
     else:
         msg += " — not searched: " + ", ".join(
-            f"{src} for {n} of {len(watches)} firms" for src, n in down_count.items())
+            f"{src} for {n} of {n_firms} firms" for src, n in down_count.items())
     return ok, msg, len(groups), total
 
 
-# Lead time for a schedule with no history yet: an all-firms digest at the measured
-# Google pacing (~2.5 s a firm) takes 20-25 minutes for 500 firms.
-DEFAULT_LEAD_S = 20 * 60
+# Lead time for a schedule with no history yet: Google is paced to ~400 requests an
+# hour, so an all-firms digest of ~500 firms takes 75-80 minutes.
+DEFAULT_LEAD_S = 90 * 60
 MAX_LEAD_S = 3 * 3600
 
 
@@ -546,8 +579,12 @@ def _permanent(msg: str) -> bool:
 
 
 async def scheduler_loop(store: ScheduleStore, runner: Callable, *,
-                         tick_seconds: int = 60) -> None:
-    """Wake once a minute, run whatever is due, re-arm it. Cancelled on shutdown."""
+                         tick_seconds: int = 60,
+                         lead: Callable[[dict[str, Any]], float] | None = None) -> None:
+    """Wake once a minute, run whatever is due, re-arm it. Cancelled on shutdown.
+    ``lead`` overrides how early a schedule starts (``lead_seconds`` by default) — a
+    digest that reads the monitor's findings needs minutes, not an hour and a half."""
+    lead_of = lead or lead_seconds
     moved = store.rearm_stale()
     if moved:
         log.info("pulse_schedules_rearmed", extra={"count": moved,
@@ -567,14 +604,18 @@ async def scheduler_loop(store: ScheduleStore, runner: Callable, *,
                 # Start EARLY by the time the search takes, and hold the email until the
                 # slot: pacing that keeps Google answering must not make a digest late.
                 # (A retry after a failed send keeps its own short delay: no lead.)
-                lead = 0.0 if int(s.get("retry") or 0) else lead_seconds(s)
-                if due - lead > now:
+                early = 0.0 if int(s.get("retry") or 0) else lead_of(s)
+                if due - early > now:
                     continue
                 # Re-arm BEFORE running: a slow or failing run must not be retried in a
                 # tight loop against the recipients' inboxes.
+                # The slot AFTER this one: computed from "now", an early start (01:10 for
+                # a 01:30 slot) found 01:30 still ahead and re-armed the same slot — the
+                # digest ran twice (cipher-test, 16 Oct: 01:10 and again at 04:09).
+                after = datetime.fromtimestamp(max(due, now) + 60, desk_tz())
                 store.touch(s["id"], next_run=next_run(s.get("cadence", "daily"),
                                                        int(s.get("hour", 8)),
-                                                       int(s.get("weekday", 0))),
+                                                       int(s.get("weekday", 0)), after),
                             last_run=now)
                 try:
                     res = await runner(s, send_at=due)

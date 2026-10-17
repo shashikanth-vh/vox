@@ -3,7 +3,7 @@ import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Typography, 
 import CloseIcon from '@mui/icons-material/Close';
 import { TextFld } from '../../components/common/Field';
 import { pulseService } from '../../services/pulseService';
-import { news, SEV_LABEL } from '../../services/newsService';
+import { news, SEV_LABEL, type NewsItem } from '../../services/newsService';
 import { db } from '../../api/atlasStore';
 import { useAuth } from '../../auth/AuthContext';
 import { tokens } from '../../theme';
@@ -52,9 +52,14 @@ export function EmailNewsDialog({ open, onClose, adhoc }: { open: boolean; onClo
   );
 }
 
-export function EmailAllFirmsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function EmailAllFirmsDialog({ open, onClose, items }: {
+  open: boolean; onClose: () => void;
+  /** What the radar shows (the monitor's findings and this browser's scans); the
+   *  browser's own store when not given. */
+  items?: NewsItem[];
+}) {
   const { user } = useAuth();
-  const all = news();
+  const all = items || news();
   const reds = all.filter((n) => n.severity === 'RED').length;
   const ambs = all.filter((n) => n.severity === 'AMBER').length;
   const [to, setTo] = useState('');
@@ -73,6 +78,7 @@ export function EmailAllFirmsDialog({ open, onClose }: { open: boolean; onClose:
       (by[name] = by[name] || []).push({
         title: n.headline, url: n.url, source: n.source, when: n.when, via: '',
         severity: SEV_LABEL[n.severity],
+        ...(n.about ? { about: n.about } : {}), ...(n.evidence ? { evidence: n.evidence } : {}),
       });
     });
     const groups = Object.keys(by).map((k) => ({ term: k, articles: by[k] }));

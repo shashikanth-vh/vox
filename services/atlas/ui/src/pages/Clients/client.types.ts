@@ -29,5 +29,7 @@ export interface Client {
   newsAliases?: string[];
   /** false = left out of the news digest (a placeholder, a place, a person). */
   newsWatch?: boolean;
+  /** The Register's promoter group: firms sharing one are linked on the News Radar. */
+  promoterGroup?: string;
 }
 export interface ClientRow extends Client { code: string; }

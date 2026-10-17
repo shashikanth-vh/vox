@@ -138,6 +138,30 @@ def anchor_of(term: str) -> str:
     return "firm-" + (re.sub(r"[^a-z0-9]+", "-", (term or "").lower()).strip("-") or "x")
 
 
+_NATURE = {"allegation": "Allegation", "action": "Action taken", "outcome": "Outcome",
+           "report": "Report"}
+
+
+def evidence_line(a: dict[str, Any]) -> str:
+    """"Allegation · pending · SEBI · Rs 120 crore" — what the story asserts, so the
+    reader tells a probe from an order before opening it. Official records say so.
+    Empty when there is no reading (a win, or a story found before readings existed)."""
+    ev = a.get("evidence") or {}
+    if not ev:
+        return ""
+    bits = [("Official record — " if ev.get("basis") == "official record" else "")
+            + _NATURE.get(str(ev.get("nature")), str(ev.get("nature") or "").title())]
+    if ev.get("favourable"):
+        bits.append("in the firm's favour")
+    elif ev.get("stage") and ev["stage"] != "unknown":
+        bits.append(str(ev["stage"]))
+    bits += [str(f) for f in ev.get("forums") or []][:2]
+    if ev.get("amount"):
+        bits.append(str(ev["amount"]))
+    return (f'<div style="color:#5A4A1F;font-size:11.5px;margin-top:2px">'
+            f'{_html.escape(" · ".join(b for b in bits if b))}</div>')
+
+
 def firm_card(term: str, articles: list[dict[str, Any]],
               dfrom: str = "", dto: str = "", *, anchor: str = "") -> str:
     """One firm: its NAME is the headline of the card, the stories sit under it.
@@ -207,7 +231,7 @@ def firm_card(term: str, articles: list[dict[str, Any]],
             'text-decoration:none;font-size:14px;font-weight:600;line-height:1.35'
             + (';opacity:.75' if is_older(a) else '') + f'">{_html.escape(a.get("title", ""))}</a>'
             f'<div style="color:{_MUTED};font-size:12px;margin-top:3px">{meta(a)}</div>'
-            + also + '</td></tr>')
+            + evidence_line(a) + also + '</td></tr>')
     body = "".join(rows) or (
         f'<tr><td style="padding:10px 0;color:{_MUTED};border-top:1px solid {_RULE}">'
         'No articles in this window.</td></tr>')
