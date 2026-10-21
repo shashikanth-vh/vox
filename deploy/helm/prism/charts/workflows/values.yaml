@@ -127,6 +127,20 @@ api:
       value: ""
       existingSecret: ""
       existingSecretKey: cam-llm-api-key
+    # Documents read at this effort (the analysis keeps the engine's), N calls at a time.
+    digestReasoningEffort: "low"
+    pipelineConcurrency: 8
+    # Fact sheets between drafts: a path on a volume you mount (empty = memory only).
+    digestCacheDir: ""
+    # engine "sarvam:glm5.3" (what Compose runs): Sarvam's /v2, effort high, 32k budget.
+    sarvam:
+      baseUrl: "https://api.sarvam.ai/v2"
+      maxTokens: 32000
+      reasoningEffort: "high"   # low | high | max; glm5.3 answers nothing without one
+      apiKey:
+        value: ""
+        existingSecret: ""
+        existingSecretKey: sarvam-api-key
     docragUrl: ""           # e.g. http://prism-docrag ; empty = basic in-process extraction
     docragApiKey: ""        # must be one of DocRAG's config.apiKeys
   # Company 360 risk grade: computed by Chitti (POST /v1/risk-grade). Empty URL = off.

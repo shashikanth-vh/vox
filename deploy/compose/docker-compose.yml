@@ -691,24 +691,30 @@ services:
       # Named service principal (svc_workflows allowlist) — least privilege.
       WORKFLOWS_REGISTER_API_KEY: "${SVC_WORKFLOWS_KEY:-compose-svc-workflows}"
       WORKFLOWS_REGISTER_TENANT: EVAM
-      # The CAM workbench engine: GLM on AWS Bedrock (bedrock:<model>, key in
-      # WORKFLOWS_CAM_LLM_API_KEY — set it in deploy/compose/.env, never in this file), or
+      # The CAM workbench engine: Sarvam glm5.3 (see below), GLM on AWS Bedrock
+      # (bedrock:<model>, key in WORKFLOWS_CAM_LLM_API_KEY — set it in
+      # deploy/compose/.env, never in this file), or
       # anthropic:<model> with WORKFLOWS_ANTHROPIC_API_KEY. Without the key the
       # deterministic stub runs: the lifecycle works, the draft is a placeholder.
       # Approval policy: false = every gate needs its human (conversion decision,
       # credit committee, CP/CS checker); true = those gates auto-approve under the
       # recorded "auto-approval (policy)" identity, with all verifications intact.
       WORKFLOWS_AUTO_APPROVE: "${WORKFLOWS_AUTO_APPROVE:-false}"
-      WORKFLOWS_CAM_ENGINE: "${WORKFLOWS_CAM_ENGINE:-bedrock:zai.glm-5}"
+      WORKFLOWS_CAM_ENGINE: "${WORKFLOWS_CAM_ENGINE:-sarvam:glm5.3}"
       WORKFLOWS_CAM_LLM_BASE_URL: "${WORKFLOWS_CAM_LLM_BASE_URL:-https://bedrock-runtime.ap-south-1.amazonaws.com/openai/v1}"
       WORKFLOWS_CAM_LLM_API_KEY: "${WORKFLOWS_CAM_LLM_API_KEY:-}"
       WORKFLOWS_ANTHROPIC_API_KEY: "${WORKFLOWS_ANTHROPIC_API_KEY:-}"
-      # Or everything on Sarvam: WORKFLOWS_CAM_ENGINE=sarvam:sarvam-105b-conversations
-      # runs the drafting engine (CAM, CP/CS reads, sanction letter) on the SARVAM_API_KEY
-      # VOCX and DocRAG already use — nothing else to set.
+      # The drafting engine (CAM, CP/CS reads, sanction letter) runs on Sarvam's glm5.3
+      # (Oct 2026: the desk moved the CAM off Bedrock GLM) with the SARVAM_API_KEY VOCX and
+      # DocRAG already use. glm5.3 is served on /v2, needs a reasoning effort (low | high |
+      # max) and spends its reasoning out of max_tokens — hence high + 32k. Back to
+      # Bedrock: WORKFLOWS_CAM_ENGINE=bedrock:zai.glm-5 (key WORKFLOWS_CAM_LLM_API_KEY).
+      # sarvam-105b-conversations instead: WORKFLOWS_SARVAM_BASE_URL=https://api.sarvam.ai/v1,
+      # WORKFLOWS_SARVAM_MAX_TOKENS=8192, WORKFLOWS_SARVAM_REASONING_EFFORT= (empty).
       WORKFLOWS_SARVAM_API_KEY: "${WORKFLOWS_SARVAM_API_KEY:-${SARVAM_API_KEY:-}}"
-      WORKFLOWS_SARVAM_BASE_URL: "${SARVAM_BASE_URL:-https://api.sarvam.ai/v1}"
-      WORKFLOWS_SARVAM_MAX_TOKENS: "${WORKFLOWS_SARVAM_MAX_TOKENS:-8192}"
+      WORKFLOWS_SARVAM_BASE_URL: "${WORKFLOWS_SARVAM_BASE_URL:-https://api.sarvam.ai/v2}"
+      WORKFLOWS_SARVAM_MAX_TOKENS: "${WORKFLOWS_SARVAM_MAX_TOKENS:-32000}"
+      WORKFLOWS_SARVAM_REASONING_EFFORT: "${WORKFLOWS_SARVAM_REASONING_EFFORT-high}"
       # Re-mint the caller's signed context so a conversion writes as the human, not the key.
       WORKFLOWS_INTERNAL_SIGNING_SECRET: "${INTERNAL_SIGNING_SECRET:-compose-internal-signing-secret}"
       WORKFLOWS_LOG_JSON: "true"
@@ -782,6 +788,10 @@ services:
       context: ../..
       dockerfile: services/workflows/Dockerfile
     command: ["python", "-m", "app.api"]
+    # The CAM's fact sheets (extracted client figures, as DocRAG's cache holds text):
+    # derived, rebuilt by the next draft if lost — not backed up.
+    volumes:
+      - camcache:/data/cam-cache
     depends_on:
       - temporal
       - workflows
@@ -812,16 +822,28 @@ services:
       # credit committee, CP/CS checker); true = those gates auto-approve under the
       # recorded "auto-approval (policy)" identity, with all verifications intact.
       WORKFLOWS_AUTO_APPROVE: "${WORKFLOWS_AUTO_APPROVE:-false}"
-      WORKFLOWS_CAM_ENGINE: "${WORKFLOWS_CAM_ENGINE:-bedrock:zai.glm-5}"
+      WORKFLOWS_CAM_ENGINE: "${WORKFLOWS_CAM_ENGINE:-sarvam:glm5.3}"
       WORKFLOWS_CAM_LLM_BASE_URL: "${WORKFLOWS_CAM_LLM_BASE_URL:-https://bedrock-runtime.ap-south-1.amazonaws.com/openai/v1}"
       WORKFLOWS_CAM_LLM_API_KEY: "${WORKFLOWS_CAM_LLM_API_KEY:-}"
       WORKFLOWS_ANTHROPIC_API_KEY: "${WORKFLOWS_ANTHROPIC_API_KEY:-}"
-      # Or everything on Sarvam: WORKFLOWS_CAM_ENGINE=sarvam:sarvam-105b-conversations
-      # runs the drafting engine (CAM, CP/CS reads, sanction letter) on the SARVAM_API_KEY
-      # VOCX and DocRAG already use — nothing else to set.
+      # The drafting engine (CAM, CP/CS reads, sanction letter) runs on Sarvam's glm5.3
+      # (Oct 2026: the desk moved the CAM off Bedrock GLM) with the SARVAM_API_KEY VOCX and
+      # DocRAG already use. glm5.3 is served on /v2, needs a reasoning effort (low | high |
+      # max) and spends its reasoning out of max_tokens — hence high + 32k. Back to
+      # Bedrock: WORKFLOWS_CAM_ENGINE=bedrock:zai.glm-5 (key WORKFLOWS_CAM_LLM_API_KEY).
+      # sarvam-105b-conversations instead: WORKFLOWS_SARVAM_BASE_URL=https://api.sarvam.ai/v1,
+      # WORKFLOWS_SARVAM_MAX_TOKENS=8192, WORKFLOWS_SARVAM_REASONING_EFFORT= (empty).
       WORKFLOWS_SARVAM_API_KEY: "${WORKFLOWS_SARVAM_API_KEY:-${SARVAM_API_KEY:-}}"
-      WORKFLOWS_SARVAM_BASE_URL: "${SARVAM_BASE_URL:-https://api.sarvam.ai/v1}"
-      WORKFLOWS_SARVAM_MAX_TOKENS: "${WORKFLOWS_SARVAM_MAX_TOKENS:-8192}"
+      WORKFLOWS_SARVAM_BASE_URL: "${WORKFLOWS_SARVAM_BASE_URL:-https://api.sarvam.ai/v2}"
+      WORKFLOWS_SARVAM_MAX_TOKENS: "${WORKFLOWS_SARVAM_MAX_TOKENS:-32000}"
+      WORKFLOWS_SARVAM_REASONING_EFFORT: "${WORKFLOWS_SARVAM_REASONING_EFFORT-high}"
+      # Documents are read into fact sheets at "low" (extraction, not judgment — ~12 s a
+      # part instead of ~90 s); the analysis keeps the effort above. 8 calls at a time.
+      # Fact sheets are kept on the camcache volume, so a deploy or a re-draft on the
+      # same file does not read every document again.
+      WORKFLOWS_CAM_DIGEST_REASONING_EFFORT: "${WORKFLOWS_CAM_DIGEST_REASONING_EFFORT-low}"
+      WORKFLOWS_CAM_PIPELINE_CONCURRENCY: "${WORKFLOWS_CAM_PIPELINE_CONCURRENCY:-8}"
+      WORKFLOWS_CAM_DIGEST_CACHE_DIR: /data/cam-cache
       # CAM documents are read by DocRAG (OpenDataLoader + Sarvam OCR for scans). If DocRAG
       # is down the workbench falls back to its basic text pass and says so per document.
       WORKFLOWS_DOCRAG_URL: "http://docrag:8000"
@@ -1033,6 +1055,8 @@ volumes:
   # Recurring news digests. Small, but losing it silently stops every scheduled
   # report — the desk would only notice by the absence of an email.
   pulsedata:
+  # The CAM's fact sheets between drafts and deploys (derived; safe to lose).
+  camcache:
   # DocRAG's documents, knowledge objects and chunks (source of truth — back it up).
   docragdata:
   # DocRAG's Qdrant storage (derived; rebuilt from docragdata if lost).

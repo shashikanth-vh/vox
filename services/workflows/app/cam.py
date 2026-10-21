@@ -280,8 +280,10 @@ class CamEngine:
     name = "stub:none"
     supports_documents = False
 
-    async def generate(self, http: Any, system: str,
-                       turns: list[dict[str, Any]]) -> str:  # pragma: no cover - interface
+    async def generate(self, http: Any, system: str, turns: list[dict[str, Any]],
+                       effort: str | None = None) -> str:  # pragma: no cover - interface
+        """``effort``: a reasoning effort for THIS call, where the engine has one (the
+        staged drafter reads documents at "low"); other engines ignore it."""
         raise NotImplementedError
 
 
@@ -291,7 +293,8 @@ class StubEngine(CamEngine):
 
     name = "stub:offline"
 
-    async def generate(self, http: Any, system: str, turns: list[dict[str, str]]) -> str:
+    async def generate(self, http: Any, system: str, turns: list[dict[str, str]],
+                       effort: str | None = None) -> str:
         record_llm_call(engine=self.name, ok=True, started=_time.monotonic(),
                         usage={"input_tokens": 0, "output_tokens": 0}, finish="stub")
         asked = sum(1 for t in turns if t["role"] == "user")
@@ -310,7 +313,8 @@ class AnthropicEngine(CamEngine):
         self.api_key = api_key
         self.name = f"anthropic:{model}"
 
-    async def generate(self, http: Any, system: str, turns: list[dict[str, Any]]) -> str:
+    async def generate(self, http: Any, system: str, turns: list[dict[str, Any]],
+                       effort: str | None = None) -> str:
         # STREAMED: an "update this CAM" answer can be the whole memo — tens of
         # thousands of tokens. Non-streaming requests that long hit idle-connection
         # timeouts; with SSE the read timeout is per-chunk, and 64000 is the model
@@ -387,7 +391,8 @@ class OpenAICompatEngine(CamEngine):
     def __init__(self, model: str, base_url: str, api_key: str, *,
                  max_tokens: int = 32768, timeout_s: float = 540.0,
                  provider: str = "bedrock", token_param: str = "max_completion_tokens",
-                 streaming: bool = True, extra_headers: dict[str, str] | None = None) -> None:
+                 streaming: bool = True, extra_headers: dict[str, str] | None = None,
+                 extra_body: dict[str, Any] | None = None) -> None:
         self.model = model
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
@@ -400,6 +405,9 @@ class OpenAICompatEngine(CamEngine):
         self.token_param = token_param
         self.streaming = streaming
         self.extra_headers = dict(extra_headers or {})
+        # Request fields a model needs beyond the standard ones — Sarvam's glm5.3 must be
+        # sent ``reasoning_effort`` or it reasons until the budget runs out.
+        self.extra_body = dict(extra_body or {})
 
     # A full CAM can run past one response's output limit. When the engine stops for
     # length, it is asked to continue from where it stopped (bounded), and the pieces
@@ -408,12 +416,30 @@ class OpenAICompatEngine(CamEngine):
     _CONTINUE = ("Continue exactly where you stopped, mid-sentence if needed. Do not repeat "
                  "anything already written and do not add a preamble.")
 
-    async def generate(self, http: Any, system: str, turns: list[dict[str, Any]]) -> str:
+    async def generate(self, http: Any, system: str, turns: list[dict[str, Any]],
+                       effort: str | None = None) -> str:
         messages = [{"role": "system", "content": system},
                     *({"role": t["role"], "content": _as_text(t["content"])} for t in turns)]
         pieces: list[str] = []
+        # A per-call effort applies only to an engine that sends one at all.
+        own = {"reasoning_effort": effort} if effort and "reasoning_effort" in self.extra_body \
+            else None
+        current = (own or self.extra_body).get("reasoning_effort")
         for _ in range(self.max_continuations + 1):
-            piece, finish = await self._complete(http, messages)
+            piece, finish = await self._complete(http, messages, own)
+            if finish == "length" and not piece.strip() and current not in (None, "low"):
+                # A reasoning model that spent the whole budget thinking (Pulze: one
+                # 95-page bank statement at "high"): asked again at "low", which answers
+                # instead of deliberating. Only that request — the next keeps "high".
+                piece, finish = await self._complete(
+                    http, messages, extra={"reasoning_effort": "low"})
+            if finish == "length" and not piece.strip():
+                # Still nothing: there is no answer to continue from, and asking again
+                # spends the same budget.
+                raise RuntimeError(
+                    f"The drafting engine used its whole output budget ({self.max_tokens} "
+                    "tokens) on reasoning and returned no answer — raise the token budget "
+                    "or lower the reasoning effort.")
             pieces.append(piece)
             if finish != "length":
                 break
@@ -424,14 +450,15 @@ class OpenAICompatEngine(CamEngine):
             raise RuntimeError("The drafting engine returned no text.")
         return text
 
-    async def _complete(self, http: Any, messages: list[dict[str, Any]]) -> tuple[str, str]:
+    async def _complete(self, http: Any, messages: list[dict[str, Any]],
+                        extra: dict[str, Any] | None = None) -> tuple[str, str]:
         """One request: (text, finish_reason). Every request is recorded with the token
         usage the provider reports — failures too, since they cost time if not tokens."""
         started = _time.monotonic()
         usage: dict[str, Any] | None = None
         finish = ""
         try:
-            text, finish, usage = await self._request(http, messages)
+            text, finish, usage = await self._request(http, messages, extra)
         except Exception as exc:
             record_llm_call(engine=self.name, ok=False, started=started, usage=usage,
                             error=str(exc))
@@ -441,6 +468,7 @@ class OpenAICompatEngine(CamEngine):
         return text, finish
 
     async def _request(self, http: Any, messages: list[dict[str, Any]],
+                       extra: dict[str, Any] | None = None,
                        ) -> tuple[str, str, dict[str, Any] | None]:
         import json as _json
 
@@ -449,7 +477,8 @@ class OpenAICompatEngine(CamEngine):
         finish = ""
         usage: dict[str, Any] | None = None
         body_json: dict[str, Any] = {"model": self.model, "messages": messages,
-                                     self.token_param: self.max_tokens}
+                                     self.token_param: self.max_tokens, **self.extra_body,
+                                     **(extra or {})}
         if self.streaming:
             # The final stream event then carries the token counts.
             body_json["stream"] = True
@@ -523,13 +552,15 @@ def build_engine(settings: Any) -> CamEngine:
         if key:
             budget = min(int(getattr(settings, "cam_max_completion_tokens", 32768)),
                          int(getattr(settings, "sarvam_max_tokens", 8192)))
+            effort = (getattr(settings, "sarvam_reasoning_effort", "") or "").strip().lower()
             return OpenAICompatEngine(
                 model or "sarvam-105b-conversations",
                 getattr(settings, "sarvam_base_url", "") or "https://api.sarvam.ai/v1", key,
                 max_tokens=budget,
                 timeout_s=float(getattr(settings, "cam_llm_timeout_s", 540.0)),
                 provider="sarvam", token_param="max_tokens", streaming=False,
-                extra_headers={"api-subscription-key": key})
+                extra_headers={"api-subscription-key": key},
+                extra_body={"reasoning_effort": effort} if effort else None)
         return StubEngine()
     if provider in ("bedrock", "openai"):
         key = (getattr(settings, "cam_llm_api_key", "") or "").strip()
@@ -611,7 +642,9 @@ class StagedDraftIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     # Documents ticked for this generation. Documents sent earlier in the conversation
     # are included automatically (the transcript records them).
-    source_doc_ids: list[str] = Field(default_factory=list, max_length=60)
+    # A real credit file runs past 60 (Pulze: 67 on the Register, 73 as submitted) and a
+    # document left off is a section written without it.
+    source_doc_ids: list[str] = Field(default_factory=list, max_length=150)
     prompt_doc_id: str | None = Field(default=None, max_length=64)
     prompt_text: str | None = Field(default=None, max_length=200_000)
     # The CAM template (rendering only) — never sent to the engine as a source.
@@ -1566,7 +1599,7 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
 
     _jobs: dict[str, dict[str, Any]] = {}
     _job_tasks: set[Any] = set()
-    _digests = DigestCache()
+    _digests = DigestCache(directory=getattr(settings, "cam_digest_cache_dir", "") or None)
     _SENT = _re.compile(r"\[documents sent: ([^\]]+)\]")
 
     def _owner(request: Request, who: str) -> str:
@@ -1696,15 +1729,27 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
             else:
                 job.update(mode="staged", sections=len(master.sections))
                 result = await draft_staged(
-                    generate=lambda sys, t: engine.generate(http, sys, t),
+                    generate=lambda sys, t, **kw: engine.generate(http, sys, t, **kw),
                     system=_SYSTEM, prompt=master, docs=docs, analyst_notes=analyst,
                     cache=_digests, model_id=engine.name, progress=progress,
                     concurrency=int(getattr(settings, "cam_pipeline_concurrency", 4)),
                     call_budget=int(getattr(settings, "cam_call_budget_chars", 360_000)),
                     digest_part_chars=int(getattr(settings, "cam_digest_part_chars", 90_000)),
-                    deal_context=deal, public_context=public)
+                    deal_context=deal, public_context=public, retry_delay_s=10.0,
+                    # Only an engine that sends a reasoning effort has one to lower.
+                    digest_effort=((getattr(settings, "cam_digest_reasoning_effort", "")
+                                    or None)
+                                   if "reasoning_effort" in getattr(engine, "extra_body", {})
+                                   else None))
                 draft, workpaper, calls = result.draft_md, result.workpaper_md, result.calls
-                notes.extend(result.notes)
+                # What the drafter could not read of a document joins that document's row.
+                rows_by_id = {n["doc_id"]: n for n in notes if n.get("doc_id")}
+                for n in result.notes:
+                    fate = rows_by_id.get(n.get("doc_id") or "")
+                    if fate is not None and "note" in n and "reason" not in n:
+                        fate["note"] = "; ".join(filter(None, [fate.get("note"), n["note"]]))
+                    else:
+                        notes.append(n)
                 job.update(qa=result.qa, figures=result.figures)
             await _record_turn(ctx, caller, who, report["id"], "user",
                                f"[generate — {job.get('mode')}] documents: "

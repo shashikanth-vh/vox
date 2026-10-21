@@ -20,7 +20,10 @@ RUN pip install .
 # ---- runtime ---------------------------------------------------------------
 FROM python:3.12-slim AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PATH="/opt/venv/bin:$PATH"
-RUN groupadd -r worker && useradd -r -g worker worker && mkdir -p /app && chown worker:worker /app
+# /data/cam-cache: the CAM's fact sheets on a volume (compose mounts one) — owned by the
+# worker here so a fresh named volume inherits that ownership.
+RUN groupadd -r worker && useradd -r -g worker worker && mkdir -p /app /data/cam-cache \
+ && chown worker:worker /app /data/cam-cache
 COPY --from=builder /opt/venv /opt/venv
 WORKDIR /app
 COPY --chown=worker:worker services/workflows/app ./app

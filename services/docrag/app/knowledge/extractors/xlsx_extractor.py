@@ -15,6 +15,12 @@ def extract_xlsx(path: str) -> list[PageResult]:
 
     for i, sheet_name in enumerate(wb.sheetnames):
         ws = wb[sheet_name]
+        # Read-only mode trusts the sheet's own <dimension> tag, and report generators
+        # often write "A1" there whatever the sheet holds: every sheet of Pulze's three
+        # bank-statement analyses (6,000+ rows each) came back "[empty sheet]", and the
+        # CAM called them empty templates. Recomputed from the rows themselves instead.
+        if hasattr(ws, "reset_dimensions"):
+            ws.reset_dimensions()
         rows = []
         for row in ws.iter_rows(values_only=True):
             if all(c is None for c in row):

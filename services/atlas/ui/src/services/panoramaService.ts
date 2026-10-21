@@ -270,6 +270,37 @@ export const panoramaService = {
     setTimeout(() => URL.revokeObjectURL(a.href), 30_000);
   },
 
+  /** The IRG report: the CAM's reading of every document, the rubric's grade on it,
+   *  and every pillar explained — a job of minutes (about 20 the first time, faster
+   *  after a CAM on the same file). ``onProgress`` gets the job's stage as it moves;
+   *  the Word file lands in the browser's downloads. */
+  async fullIrgReport(entityId: string | null, company: string,
+                      onProgress?: (stage: string, done: number, total: number) => void,
+                      ): Promise<void> {
+    const start = await orchestrator.post<any>('/v1/panorama/risk-grade/full',
+      { company, entity_id: entityId }, { timeoutMs: 90_000 });
+    const id = start.job_id as string;
+    for (let i = 0; i < 1440; i++) {              // up to two hours at 5 s
+      await new Promise((r) => setTimeout(r, 5_000));
+      const job = await orchestrator.get<any>(`/v1/panorama/risk-grade/full/${id}`,
+        undefined, { timeoutMs: 30_000 });
+      onProgress?.(job.stage || 'Working', job.done || 0, job.total || 0);
+      if (job.status === 'failed') throw new Error(job.error || 'The IRG report failed.');
+      if (job.status === 'done') {
+        const blob = await orchestrator.getBlob(`/v1/panorama/risk-grade/full/${id}/report`);
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `IRG report - ${company} - ${new Date().toISOString().slice(0, 10)}.docx`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 30_000);
+        return;
+      }
+    }
+    throw new Error('The IRG report is still running — try again later.');
+  },
+
   /** The FINANCIALS card's live feed. 409 = not configured, or no CIN on
    *  record — both carry a human remedy in the error detail, and the card
    *  falls back to prospect figures rather than going blank. */

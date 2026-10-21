@@ -58,9 +58,15 @@ class Settings(BaseServiceSettings):
     #                      sarvam-105b-conversations (it refuses more with a 400);
     #                      a long CAM is continued across requests, so the ceiling
     #                      bounds one answer, not the draft.
+    #                      glm5.3 (the desk's CAM engine from Oct 2026) is served on
+    #                      /v2 and MUST be sent a reasoning effort (low | high | max —
+    #                      "medium" is refused): without one it reasons until the budget
+    #                      is spent and answers HTTP 200 with no content. Its reasoning
+    #                      counts against max_tokens, hence a 32k budget in compose.
     sarvam_api_key: str = ""
     sarvam_base_url: str = "https://api.sarvam.ai/v1"
     sarvam_max_tokens: int = 8192
+    sarvam_reasoning_effort: str = ""
     cam_max_completion_tokens: int = 32768
     cam_llm_timeout_s: float = 540.0
     # Sized for a REAL CAM: the reference Pinnacle CAM extracts to ~150k chars, and an
@@ -72,7 +78,21 @@ class Settings(BaseServiceSettings):
     # The staged drafter (Generate CAM with a master prompt that has section specs):
     # parallel calls, the context budget of ONE call (prompt rules + fact sheets +
     # dataset), and the page-aligned part size a large document is digested in.
-    cam_pipeline_concurrency: int = 4
+    # 8 parallel calls: a real file is 80+ document parts, and at 4 the reading alone
+    # took 17 of a CAM's 39 minutes on Sarvam (Pulze, Oct 2026).
+    cam_pipeline_concurrency: int = 8
+    # Reading a document into its fact sheet is extraction, not judgment: run at this
+    # reasoning effort (Sarvam glm5.3: ~12 s a part at "low" against ~80–110 s at
+    # "high"). The dataset, sections and repairs keep the engine's own effort. Empty =
+    # the engine's effort everywhere.
+    cam_digest_reasoning_effort: str = "low"
+    # Where fact sheets are kept between runs and restarts (a volume in compose). Empty =
+    # in memory only, so every deploy re-reads every document.
+    cam_digest_cache_dir: str = ""
+    # The IRG's pillar sections explain a grade and evidence already worked out: written
+    # at this effort (~15 s instead of ~60 s each); its rating summary and its risks and
+    # recommendation keep the engine's. Empty = the engine's effort everywhere.
+    irg_section_reasoning_effort: str = "low"
     cam_call_budget_chars: int = 360_000
     cam_digest_part_chars: int = 90_000
 
@@ -92,8 +112,10 @@ class Settings(BaseServiceSettings):
     # (text through DocRAG, budgeted per file and per grade), and PULSE's news. The
     # bureau reports and KYC live in their own sections: a grade that cannot see them
     # can never clear the bureau or KYC triggers honestly.
-    risk_grade_doc_sections: str = ("Financials,Banking & Debt,Compliance & Bureau,"
-                                    "KYC & Constitutional")
+    # "all" (the default): every section — the term sheet and company profile live in Deal
+    # Documents, orders and POs in Project & Technical, and a grade is the desk's view of
+    # EVERYTHING on file. A comma list ("Financials,Banking & Debt") narrows it.
+    risk_grade_doc_sections: str = "all"
     risk_grade_doc_max_chars: int = 40_000
     risk_grade_docs_total_chars: int = 280_000
     pulse_url: str = ""

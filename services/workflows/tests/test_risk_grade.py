@@ -51,9 +51,24 @@ GRADE = {"rating": "AMBER", "provisional": True, "label": "AMBER – PROVISIONAL
          "prompt_version": "abc", "generated_at": "2026-09-29T10:00:00+00:00"}
 
 
+RECORDS = {  # the Register's own records about the company, as its lists return them
+    "/v1/interactions": [{"id": "i1", "tenant_id": "EVAM", "occurred_at": "2026-09-01",
+                          "interaction_type": "Meeting", "summary": "Plant visit",
+                          "notes": "Promoter says the BOI CC is fully drawn. " * 60}],
+    "/v1/external-intelligence": [
+        {"id": "x1", "intel_type": "Regulatory", "source": "IBBI", "signal": "RED",
+         "title": "CIRP admitted against a group company", "observed_at": "2026-07-01"},
+        {"id": "x2", "intel_type": "News", "title": "Old story", "is_dismissed": True}],
+    "/v1/financials": [{"id": "f1", "statement_type": "PnL", "fiscal_year": "FY25",
+                        "period_end": "2025-03-31", "is_audited": True}],
+    "/v1/monitoring": [],
+}
+
+
 class _Register:
-    def __init__(self, restricted=(), docs=DOCS):  # noqa: ANN001
+    def __init__(self, restricted=(), docs=DOCS, records=None):  # noqa: ANN001
         self.restricted, self.docs = list(restricted), docs
+        self.records = RECORDS if records is None else records
         self.reads: list[str] = []
 
     async def get(self, url, **kw):  # noqa: ANN001, ANN003
@@ -63,8 +78,12 @@ class _Register:
         if u.endswith("/v1/panorama"):
             return httpx.Response(200, json={**PANORAMA, "restricted": self.restricted},
                                   request=req)
-        if "/v1/documents?entity_id=e-1" in u:
+        params = kw.get("params") or {}
+        if u.endswith("/v1/documents") and params.get("entity_id") == "e-1":
             return httpx.Response(200, json={"items": self.docs}, request=req)
+        for path, rows in self.records.items():
+            if u.endswith(path) and params.get("entity_id") == "e-1":
+                return httpx.Response(200, json={"items": rows}, request=req)
         if u.endswith("/content"):
             ctype, body = CONTENT[u.split("/v1/documents/")[1].split("/")[0]]
             return httpx.Response(200, content=body, headers={"content-type": ctype},

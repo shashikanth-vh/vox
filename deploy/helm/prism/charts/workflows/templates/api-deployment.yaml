@@ -138,6 +138,34 @@ spec:
                   key: cam-llm-api-key
                   {{- end }}
             {{- end }}
+            - name: WORKFLOWS_CAM_DIGEST_REASONING_EFFORT
+              value: {{ .Values.api.cam.digestReasoningEffort | default "" | quote }}
+            - name: WORKFLOWS_CAM_PIPELINE_CONCURRENCY
+              value: {{ .Values.api.cam.pipelineConcurrency | default 8 | quote }}
+            {{- with .Values.api.cam.digestCacheDir }}
+            - name: WORKFLOWS_CAM_DIGEST_CACHE_DIR
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.api.cam.sarvam }}
+            - name: WORKFLOWS_SARVAM_BASE_URL
+              value: {{ .baseUrl | quote }}
+            - name: WORKFLOWS_SARVAM_MAX_TOKENS
+              value: {{ .maxTokens | quote }}
+            - name: WORKFLOWS_SARVAM_REASONING_EFFORT
+              value: {{ .reasoningEffort | default "" | quote }}
+            {{- if or .apiKey.value .apiKey.existingSecret }}
+            - name: WORKFLOWS_SARVAM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  {{- if .apiKey.existingSecret }}
+                  name: {{ .apiKey.existingSecret }}
+                  key: {{ .apiKey.existingSecretKey }}
+                  {{- else }}
+                  name: {{ include "workflows.fullname" $ }}-cam
+                  key: sarvam-api-key
+                  {{- end }}
+            {{- end }}
+            {{- end }}
             {{- with .Values.api.cam.docragUrl }}
             - name: WORKFLOWS_DOCRAG_URL
               value: {{ . | quote }}

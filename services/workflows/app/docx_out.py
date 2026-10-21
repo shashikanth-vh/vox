@@ -85,8 +85,10 @@ _INLINE = re.compile(
     r'(\*\*.+?\*\*|__.+?__|==[^=\n]+?==|::[^:\n]+?::|\*[^*\n]+\*|_[^_\n]+_|`[^`\n]+`)')
 
 
-def _runs(text: str, *, bold: bool = False, color: str | None = None) -> str:
-    """**bold**, *italic*, `code`, ==yellow==, ::cyan:: → <w:r> runs."""
+def _runs(text: str, *, bold: bool = False, color: str | None = None,
+          size: int | None = None) -> str:
+    """**bold**, *italic*, `code`, ==yellow==, ::cyan:: → <w:r> runs. ``size`` is in
+    half-points (table text is set smaller than body text)."""
     out: list[str] = []
     for piece in _INLINE.split(text):
         if not piece:
@@ -106,29 +108,34 @@ def _runs(text: str, *, bold: bool = False, color: str | None = None) -> str:
         rpr = ('<w:rPr>' + ('<w:b/>' if b else '') + ('<w:i/>' if i else '')
                + ('<w:rFonts w:ascii="Consolas" w:hAnsi="Consolas"/>' if mono else '')
                + (f'<w:color w:val="{color}"/>' if color else '')
+               + (f'<w:sz w:val="{size}"/><w:szCs w:val="{size}"/>' if size else '')
                + (f'<w:highlight w:val="{mark}"/>' if mark else '')
-               + '</w:rPr>') if (b or i or mono or mark or color) else ''
+               + '</w:rPr>') if (b or i or mono or mark or color or size) else ''
         out.append(f'<w:r>{rpr}<w:t xml:space="preserve">{escape(piece)}</w:t></w:r>')
     return ''.join(out) or '<w:r><w:t xml:space="preserve"></w:t></w:r>'
 
 
 def _p(text: str, *, style: str | None = None, indent: int = 0,
        bullet: bool = False, number: str | None = None, bold: bool = False,
-       color: str | None = None, fill: str | None = None) -> str:
+       color: str | None = None, fill: str | None = None, size: int | None = None,
+       tight: bool = False, align: str | None = None) -> str:
     ppr = ''
-    if style or indent or bullet or fill:
+    if style or indent or bullet or fill or tight or align:
         ppr = ('<w:pPr>'
                + (f'<w:pStyle w:val="{style}"/>' if style else '')
                + (f'<w:shd w:val="clear" w:fill="{fill}"/>' if fill else '')
+               + ('<w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"/>'
+                  if tight else '')
                + (f'<w:ind w:left="{indent}" w:hanging="240"/>' if (bullet or number) and indent
                   else f'<w:ind w:left="{indent}"/>' if indent else '')
+               + (f'<w:jc w:val="{align}"/>' if align else '')
                + '</w:pPr>')
     lead = ''
     if bullet:
         lead = '<w:r><w:t xml:space="preserve">•  </w:t></w:r>'
     elif number:
         lead = f'<w:r><w:t xml:space="preserve">{escape(number)}  </w:t></w:r>'
-    return f'<w:p>{ppr}{lead}{_runs(text, bold=bold, color=color)}</w:p>'
+    return f'<w:p>{ppr}{lead}{_runs(text, bold=bold, color=color, size=size)}</w:p>'
 
 
 def _code_p(text: str) -> str:
@@ -175,8 +182,73 @@ def _template_accent(doc_xml: str, styles_xml: str) -> str:
     return _NAVY
 
 
+# A4 with 2 cm margins: the text block a CAM table spans, in twentieths of a point.
+_TEXT_WIDTH = 9638
+_CAM_CELL = 18                     # 9 pt: dense financial tables fit the page width
+_NUMERIC = re.compile(r'^[\s(₹]*(?:rs\.?\s*)?[-–+]?[\d,]+(?:\.\d+)?\s*(?:%|x|lakh|cr|days)?\)?$',
+                      re.I)
+
+
+def _plain(cell: str) -> str:
+    return re.sub(r'[*_`=:]{2}|[*_`]', '', cell).strip()
+
+
+def _col_widths(rows: list[list[str]]) -> list[int]:
+    """Column widths in proportion to what each column holds — a label column of long
+    phrases gets room, a column of figures stays narrow — across the full text width.
+    Word's auto layout instead squeezed long cells into slivers and left the page half
+    empty (the credit team's review of the first Pulze CAM)."""
+    cols = max(len(r) for r in rows)
+    weight = []
+    for c in range(cols):
+        texts = [_plain(r[c]) for r in rows if c < len(r)]
+        longest_word = max((len(w) for t in texts for w in t.split()), default=4)
+        avg = sum(len(t) for t in texts) / max(len(texts), 1)
+        weight.append(max(min(avg, 60.0), longest_word * 0.9, 4.0))
+    total = sum(weight)
+    widths = [max(int(_TEXT_WIDTH * w / total), 700) for w in weight]
+    scale = _TEXT_WIDTH / sum(widths)
+    return [int(w * scale) for w in widths]
+
+
+def _cam_table(rows: list[list[str]], header: bool) -> str:
+    """The EVAM CAM table (master prompt C4): full width, sized columns, 9 pt text on
+    tight spacing, navy header band repeated on every page, zebra rows that never split
+    across a page, figures right-aligned."""
+    widths = _col_widths(rows)
+    xml = ['<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblLayout w:type="fixed"/>'
+           + _TBL_BORDER
+           + '<w:tblCellMar><w:top w:w="30" w:type="dxa"/><w:left w:w="70" w:type="dxa"/>'
+             '<w:bottom w:w="30" w:type="dxa"/><w:right w:w="70" w:type="dxa"/>'
+             '</w:tblCellMar></w:tblPr><w:tblGrid>'
+           + ''.join(f'<w:gridCol w:w="{w}"/>' for w in widths) + '</w:tblGrid>']
+    for r, cells in enumerate(rows):
+        is_head = header and r == 0
+        xml.append('<w:tr><w:trPr><w:cantSplit/>' + ('<w:tblHeader/>' if is_head else '')
+                   + '</w:trPr>')
+        body_row = r - (1 if header else 0)
+        for c, cell in enumerate(cells):
+            numeric = c > 0 and bool(_NUMERIC.match(_plain(cell)))
+            if is_head:
+                shade = f'<w:shd w:val="clear" w:fill="{_CAM_HEAD}"/>'
+                para = _p(cell, bold=True, color='FFFFFF', size=_CAM_CELL, tight=True,
+                          align='right' if numeric else None)
+            else:
+                shade = (f'<w:shd w:val="clear" w:fill="{_CAM_ZEBRA}"/>'
+                         if body_row % 2 == 1 else '')
+                para = _p(cell, size=_CAM_CELL, tight=True, align='right' if numeric else None)
+            xml.append(f'<w:tc><w:tcPr><w:tcW w:w="{widths[c]}" w:type="dxa"/>{shade}'
+                       f'<w:vAlign w:val="center"/></w:tcPr>{para}</w:tc>')
+        xml.append('</w:tr>')
+    xml.append('</w:tbl>')
+    xml.append('<w:p><w:pPr><w:spacing w:before="0" w:after="60"/></w:pPr></w:p>')
+    return ''.join(xml)
+
+
 def _table(rows: list[list[str]], header: bool, *, letterhead: bool = False,
            accent: str = _NAVY, cam: bool = False) -> str:
+    if cam:
+        return _cam_table(rows, header)
     xml = ['<w:tbl><w:tblPr>'
            '<w:tblW w:w="0" w:type="auto"/>' + _TBL_BORDER
            + '<w:tblCellMar><w:left w:w="80" w:type="dxa"/><w:right w:w="80" w:type="dxa"/></w:tblCellMar>'
@@ -184,16 +256,8 @@ def _table(rows: list[list[str]], header: bool, *, letterhead: bool = False,
     for r, cells in enumerate(rows):
         is_head = header and r == 0
         xml.append('<w:tr>')
-        body_row = r - (1 if header else 0)
         for c, cell in enumerate(cells):
-            if is_head and cam:
-                shade = f'<w:shd w:val="clear" w:fill="{_CAM_HEAD}"/>'
-                para = _p(cell, bold=True, color='FFFFFF')
-            elif cam:
-                shade = (f'<w:shd w:val="clear" w:fill="{_CAM_ZEBRA}"/>'
-                         if body_row % 2 == 1 else '')
-                para = _p(cell)
-            elif is_head and letterhead:
+            if is_head and letterhead:
                 shade = f'<w:shd w:val="clear" w:fill="{accent}"/>'
                 para = _p(cell, bold=True, color='FFFFFF')
             elif is_head:
@@ -234,9 +298,10 @@ def _is_separator(line: str) -> bool:
 # Memorandum" (lender, borrower, constitution, facility, terms, dates, preparer).
 # Rendered as body text the borrower's name was a 10.5pt line under the lender's —
 # the committee reads the cover for WHO, so the borrower leads and the lender signs.
-_COVER_H1 = re.compile(r'^#\s+credit appraisal memorandum\s*$', re.I)
+# The IRG report opens the same way (its own title), and gets the same cover.
+_COVER_H1 = re.compile(r'^#\s+(credit appraisal memorandum|internal risk grade report)\s*$', re.I)
 _COVER_FACTS = ('document date', 'financial data', 'banking data', 'debtor data',
-                'debt data', 'prepared by')
+                'debt data', 'prepared by', 'risk grade', 'graded by')
 
 
 def _cover_run(text: str, *, size: int, bold: bool = False, color: str | None = None,
@@ -273,6 +338,9 @@ def _cam_cover(lines: list[str], accent: str) -> str:
     """The title block as a cover page: eyebrow, the BORROWER large, its constitution,
     the facility band, a facts grid (dates, preparer), the lender small at the foot."""
     lines = [ln.strip() for ln in lines if ln.strip()]
+    eyebrow = next((ln.split(':', 1)[1] for ln in lines if ln.startswith('__eyebrow__:')),
+                   'Credit Appraisal Memorandum')
+    lines = [ln for ln in lines if not ln.startswith('__eyebrow__:')]
     lender = next((ln for ln in lines if ln.lower().startswith('evam finance')), '')
     rest = [ln for ln in lines if ln != lender]
     facts = [ln for ln in rest if ln.lower().startswith(_COVER_FACTS)]
@@ -284,7 +352,7 @@ def _cam_cover(lines: list[str], accent: str) -> str:
     other = [ln for ln in plain if ln not in terms]
     grey, ink = '595959', '262626'
 
-    out = [_cover_p(_cover_run('Credit Appraisal Memorandum', size=22, bold=True,
+    out = [_cover_p(_cover_run(eyebrow, size=22, bold=True,
                                color=accent, caps=True, spacing=40), before=1800, after=240)]
     if name:
         out.append(_cover_p(_cover_run(name, size=60, bold=True, color=accent, caps=True),
@@ -344,7 +412,9 @@ def _split_cover(md: str) -> tuple[list[str] | None, str]:
     block = [ln for ln in lines[start + 1:end] if ln.strip()]
     if not block:
         return None, md
-    return block, '\n'.join(lines[end:])
+    # The cover's eyebrow is the document's own title (a CAM, an IRG report).
+    title = lines[start].strip().lstrip('#').strip()
+    return [f"__eyebrow__:{title}", *block], '\n'.join(lines[end:])
 
 
 def _render_body(md: str, title: str | None = None, *,
@@ -441,6 +511,11 @@ def _render_body(md: str, title: str | None = None, *,
             continue
         if line.lstrip().startswith('>'):
             emit(_p(line.lstrip()[1:].strip(), indent=360))
+            i += 1
+            continue
+        if cam and line.strip().startswith('*Source:'):
+            # The one source line under a table: small and grey, tight to the table.
+            emit(_p(line.strip(), size=16, color='595959', tight=True))
             i += 1
             continue
 

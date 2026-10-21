@@ -244,6 +244,29 @@ function ReportButton({ grade }: { grade: RiskGrade }) {
   );
 }
 
+/** The IRG report — the full credit document behind the grade (a job of minutes). */
+function FullReportButton({ grade }: { grade: RiskGrade }) {
+  const [busy, setBusy] = useState(false);
+  const [stage, setStage] = useState('');
+  const [err, setErr] = useState('');
+  return (
+    <Tooltip title={err || (busy ? stage : 'The IRG report: every document read the CAM way, '
+      + 'the grade on it and each pillar explained, as a Word document (about 20 minutes)')}>
+      <Button size="small" startIcon={busy ? <CircularProgress size={12} /> : <DownloadIcon />}
+        disabled={busy} sx={{ fontSize: 11, color: err ? tokens.bad : undefined }}
+        onClick={async () => {
+          setBusy(true); setErr(''); setStage('Starting');
+          try {
+            await panoramaService.fullIrgReport(grade.entity_id ?? null, grade.company,
+              (s, d, t) => setStage(t ? `${s} ${d}/${t}` : s));
+          } catch (e: any) {
+            setErr(e?.message || 'The IRG report could not be created.');
+          } finally { setBusy(false); }
+        }}>{busy ? stage || 'Working' : 'Full IRG report'}</Button>
+    </Tooltip>
+  );
+}
+
 export function RiskGradeDetails({ grade, onRegrade }: {
   grade: RiskGrade; onRegrade?: () => void;
 }) {
@@ -276,6 +299,7 @@ export function RiskGradeDetails({ grade, onRegrade }: {
           sx={{ height: 20, fontSize: 10.5, fontWeight: 700 }} />
         <Box sx={{ flex: 1 }} />
         <ReportButton grade={grade} />
+        <FullReportButton grade={grade} />
         {onRegrade && (
           <Button size="small" startIcon={<RefreshIcon />} onClick={onRegrade}
             sx={{ fontSize: 11 }}>Regrade</Button>)}

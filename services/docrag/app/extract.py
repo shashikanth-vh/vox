@@ -34,6 +34,11 @@ log = get_logger("docrag.extract")
 
 # Bump when the rendering or pipeline output changes, so cached results are recomputed.
 PIPELINE_VERSION = "1"
+# Spreadsheets have their own version on top: bumped when only the workbook reader
+# changes, so cached workbooks are re-read (free — no OCR) while every OCR'd PDF keeps
+# its cached result. 2: sheets whose <dimension> tag says A1 are read in full.
+SHEET_VERSION = "2"
+_SHEETS = (".xlsx", ".xlsm", ".xls")
 _TRANSIENT = ("Sarvam Doc AI failed", "Sarvam returned no content")
 
 
@@ -119,7 +124,8 @@ class Extractor:
                 use_sarvam: bool) -> dict[str, Any]:
         started = time.monotonic()
         digest = hashlib.sha256(data).hexdigest()
-        key = f"{digest}-{'s' if use_sarvam else 'n'}-v{PIPELINE_VERSION}"
+        key = f"{digest}-{'s' if use_sarvam else 'n'}-v{PIPELINE_VERSION}" + (
+            f"-x{SHEET_VERSION}" if Path(filename).suffix.lower() in _SHEETS else "")
         path = self.root / tenant / f"{key}.json"
         # One extraction per file at a time: concurrent requests for the same document
         # (two analysts, a retried turn) wait for the first instead of paying twice.

@@ -146,7 +146,8 @@ def facts_text(facts: dict[str, Any] | None) -> str:
     """PRISM's own reading of the fixed-format files (bank-statement analyses, bureau
     reports, the CMA grid) — put before the rubric's STEP 1 so the readings use these
     figures instead of paraphrasing 200k characters of statements."""
-    if not facts or not (facts.get("flags") or facts.get("key_figures")):
+    if not facts or not (facts.get("flags") or facts.get("key_figures")
+                         or facts.get("kinds_read") or facts.get("unread_files")):
         return ""
     out = ["=== VERIFIED FACTS (read by PRISM from the full files; use these figures as "
            "given, and cite them) ==="]
@@ -159,6 +160,13 @@ def facts_text(facts: dict[str, Any] | None) -> str:
         out.append(f"Key figures from {kf.get('source')} ({kf.get('unit')}; years {years}):")
         for k, row in kf["rows"].items():
             out.append(f"  {k}: " + ", ".join(f"{y} {v:,.2f}" for y, v in row.items()))
+    kinds = facts.get("kinds_read") or {}
+    if kinds:
+        out.append("Kinds of document READ for this grade (they ARE on record — never call "
+                   "one missing, empty or not provided; if a period or item is truly absent "
+                   "from them, say exactly what they cover):")
+        out += [f"  {k}: " + "; ".join(v[:6]) + (f" (+{len(v) - 6} more)" if len(v) > 6 else "")
+                for k, v in kinds.items()]
     if facts.get("unread_files"):
         out.append("Files on the Data Register that were NOT read (not evidence — a trigger "
                    "cannot be Clear because one of these exists): "
@@ -166,13 +174,23 @@ def facts_text(facts: dict[str, Any] | None) -> str:
     return "\n".join(out)
 
 
+def _records(rows: list[dict] | None, keep: int, clip: int = 1500) -> str:
+    """Register records in full (the desk's own words): long fields to ``clip``."""
+    if not rows:
+        return "Not available"
+    return json.dumps([{k: _clip(v, clip) for k, v in r.items() if v not in (None, "", [])}
+                       for r in rows[:keep]], ensure_ascii=False, default=str)
+
+
 def build_client_data(p: dict[str, Any], news: list[dict[str, Any]],
                       evidence: list[dict[str, Any]], today: date,
                       documents: list[dict[str, Any]] | None = None,
-                      facts: dict[str, Any] | None = None) -> str:
+                      facts: dict[str, Any] | None = None,
+                      records: dict[str, list[dict[str, Any]]] | None = None) -> str:
     a = p.get("anchor") or {}
     s = p.get("stats") or {}
     restricted = p.get("restricted") or []
+    rec = records or {}
 
     def lines_with_age(rows: list[dict]) -> list[dict]:
         out = []
@@ -210,7 +228,7 @@ def build_client_data(p: dict[str, Any], news: list[dict[str, Any]],
             f"- {'[about ' + n['about'] + '] ' if n.get('about') else ''}"
             f"{_clip(n.get('headline'), 200)} · {n.get('source') or '?'} · "
             f"{n.get('when') or '?'} · {label.get(str(n.get('severity') or '').upper(), 'UNTAGGED')}"
-            for n in news[:40])
+            for n in news[:100])
 
     last_touch = s.get("last_touch")
     contacts = p.get("contacts") or []
@@ -231,6 +249,8 @@ def build_client_data(p: dict[str, Any], news: list[dict[str, Any]],
         "documents (cite the FILE name in evidence; take figures only from here, never "
         "invent them; a CMA/projection file is a projection, not an actual):",
         ev_text,
+        f"   Financial statements recorded on the Register (current versions): "
+        f"{_records(rec.get('financials'), 60, 400)}",
         f"6. Documentation: {len(docs)} file(s) on the Data Register, by section "
         f"{json.dumps(by_section)}; files: {_rows(docs, keep=40)}",
         "7. Project & technical: use the documents and deal fields above if present.",
@@ -239,10 +259,19 @@ def build_client_data(p: dict[str, Any], news: list[dict[str, Any]],
         "8. Engagement: last touch Not available",
         f"   Key contacts on record: {'Y' if contacts else 'N'} {_rows(contacts)}",
         f"   Leads: {_rows(p.get('leads') or [])}",
+        # The full timeline when PRISM sent it (every interaction with its notes), else
+        # the panorama's summary of the latest.
+        f"   Interactions & VOX, full notes (most recent first): "
+        f"{_records(rec.get('interactions'), 120)}" if rec.get("interactions") else
         f"   Interactions & VOX (most recent first): {_rows(p.get('interactions') or [], keep=15)}",
+        f"   Monitoring records (covenants, submissions, behaviour): "
+        f"{_records(rec.get('monitoring'), 60, 400)}",
         f"   Field brief: {_clip(p.get('brief_full') or p.get('brief'), 1500) or 'Not available'}",
-        f"9. News (PULSE radar, last 90 days — the firm, and its key people marked "
+        f"9. News (PULSE radar, last 12 months — the firm, and its key people marked "
         f"[about <name>]): \n{news_text}",
+        f"   Intelligence on the Register (the news monitor's SEBI / IBBI / NSE / adverse "
+        f"findings and the desk's own signals, not dismissed; newest first): "
+        f"{_records(rec.get('intelligence'), 120, 600)}",
         f"10. Today's date: {today.isoformat()}",
         facts_text(facts),
         (f"NOTE: these sections are not visible to the requesting role and are absent: "
@@ -725,9 +754,12 @@ class RiskGradeIn(BaseModel):
     company: str = Field(min_length=1, max_length=300)
     # The Register's panorama for the company, exactly as the caller's role sees it.
     panorama: dict[str, Any]
-    news: list[NewsIn] = Field(default_factory=list, max_length=60)
+    news: list[NewsIn] = Field(default_factory=list, max_length=100)
     # The company's Data Register files, read by the caller's DocRAG (CAM's path).
-    documents: list[DocumentIn] = Field(default_factory=list, max_length=40)
+    documents: list[DocumentIn] = Field(default_factory=list, max_length=150)
+    # The Register's records beyond the panorama, read as the caller by PRISM:
+    # interactions (full notes), intelligence, financials, monitoring.
+    records: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
     # What PRISM read itself from those files: flags, key figures, verified triggers,
     # and the listed files that were not read (see apply_verified).
     facts: dict[str, Any] = Field(default_factory=dict)
@@ -830,7 +862,8 @@ def build_risk_router(settings: Settings) -> APIRouter:
         news = [n.model_dump() for n in payload.news]
         messages = [{"role": "system", "content": system},
                     {"role": "user", "content": build_client_data(
-                        p, news, ev, datetime.now(UTC).date(), documents, payload.facts)}]
+                        p, news, ev, datetime.now(UTC).date(), documents, payload.facts,
+                        payload.records)}]
         usage = {"calls": 0, "input_tokens": 0, "output_tokens": 0}
 
         async def one_run() -> dict[str, Any]:
@@ -888,6 +921,7 @@ def build_risk_router(settings: Settings) -> APIRouter:
                 "documents_cited": sorted({d["name"] for d in documents} | {e["doc"] for e in ev}),
                 "document_note": ev_note,
                 "news_items": len(news),
+                "records": {k: len(v) for k, v in payload.records.items()},
             },
             "usage": {**usage, "seconds": seconds},
         }

@@ -13,7 +13,16 @@ built from data it cannot see:
   Register and go through DocRAG ``/v1/extract`` (OpenDataLoader, Sarvam OCR for
   scans, cached per file), and only the extracted text travels to the AI host;
 * **PULSE**: the firm's and its key people's news, with PULSE's own verdicts,
-  fetched server-side (the dialog's news is only a fallback when PULSE is down).
+  fetched server-side (the dialog's news is only a fallback when PULSE is down);
+* the **Register's own records** beyond the panorama's summary: every interaction
+  with its full notes (VOX captures, calls, meetings), the external intelligence the
+  news monitor filed (SEBI, IBBI, NSE, adverse news — not dismissed), the financial
+  statements on record and the monitoring records that feed the IRG.
+
+The files are prepared the way the CAM prepares them (``cam_pipeline``): a
+transaction listing of any bank is summed month by month by PRISM, a workbook's short
+sheets go before its bulk listings, a file uploaded twice is read once — and the
+model is told which KINDS of document were read, so it never calls them missing.
 
 A grade is computed only on request — one company, when someone asks — and cached
 per company AND per visible-section set (24 h, in memory; "Regrade" computes afresh).
@@ -22,6 +31,7 @@ per company AND per visible-section set (24 h, in memory; "Regrade" computes afr
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import time
 from datetime import UTC, date, datetime, timedelta
@@ -34,6 +44,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.cam import extract_text, image_suffix, is_pdf
+from app.cam_pipeline import _uniq, claims_missing, focus_workbook, summarise_ledgers
 from app.docx_out import markdown_to_docx
 from app.panorama_bridge import unpack_zip
 from app.risk_facts import coverage, facts_of, flags_from, key_figures, mask_ids
@@ -48,8 +59,40 @@ _KEEP = {"interactions": 30, "documents": 80, "leads": 25, "deals": 25, "lending
 # Register rows that carry no current file to read.
 _SKIP_STATUS = {"Pending", "Rejected", "Superseded", "Expired", "Waived"}
 _OLE2 = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"          # Excel 97–2003 (.xls) container
-# The AI host accepts at most this many files per grade (RiskGradeIn.documents).
-_MAX_SENT = 40
+# The AI host accepts at most this many files per grade (RiskGradeIn.documents). A real
+# credit file runs to 70 (Pulze); with ledgers summarised the text budget holds them.
+_MAX_SENT = 150
+# The Register records read beyond the panorama, newest first: (path, cap, filters).
+_RECORDS = {"interactions": ("/v1/interactions", 120, {}),
+            "intelligence": ("/v1/external-intelligence", 120, {}),
+            "financials": ("/v1/financials", 60, {"is_current": "true"}),
+            "monitoring": ("/v1/monitoring", 60, {})}
+_RECORD_FIELD_MAX = 1500            # one field of one record (an interaction's notes)
+_RECORDS_TOTAL = 100_000            # all records together, characters of JSON (~25k tokens)
+_DROP = {"id", "tenant_id", "entity_id", "deal_id", "created_by", "updated_by",
+         "deleted_at", "is_deleted", "row_version", "payload", "embedding"}
+# A file's kind from its name or Data Register slot — what the grade tells the model
+# it HAS read (cam_pipeline's kinds, so "missing" is judged the same way).
+_KIND_OF_NAME = (("bank statement analysis", r"\bbsa\b|statement analysis"),
+                 ("bank statement", r"\bbank|account statement|statement of account|current "
+                                    r"account|\baccount \d|\bcc\b|\bod\b|optransaction"),
+                 ("GST return", r"\bgst(?:r|r-?\d\w?)?\b.*(?:return|report|summary|3b|r1)|gstr"),
+                 ("income tax return", r"\bitr\b|income[- ]tax|\bit fy"),
+                 ("CMA / projections", r"\bcma\b|projection"),
+                 ("financial statements", r"audited|balance ?sheet|bsheet|p ?& ?l|pandl|profit"
+                                          r"|financ"),
+                 ("credit bureau report", r"cibil|\bcir\b|crif|experian|equifax|bureau|cmr"),
+                 ("legal / litigation report", r"legal|litigation"),
+                 ("debtor / creditor ageing", r"debtor|creditor|ageing|aging"),
+                 ("order / PO", r"\bpo\b|purchase order|order"),
+                 ("sanction letter", r"sanction|term loan|vehicle loan|\bloan\b"),
+                 ("debt profile", r"debt profile|loan schedule"),
+                 ("term sheet", r"term ?sheet"),
+                 ("company profile", r"company profile|pitch|deck|brochure"),
+                 ("net worth statement", r"net ?worth"),
+                 ("constitution / registration", r"deed|registration certificate|incorporation"
+                                                 r"|msme|udyam|gst certificate"),
+                 ("KYC", r"\bpan\b|aadha?a?r|kyc|passport|voter"))
 # A desk zip's members, typed by suffix for the reader (unpack_zip keeps only these).
 _MEMBER_CTYPE = {".pdf": "application/pdf", ".xls": "application/vnd.ms-excel",
                  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -117,7 +160,8 @@ def read_order(d: dict[str, Any]) -> tuple[int, int, str]:
 
 
 def fingerprint(panorama: dict[str, Any], news: list[dict[str, Any]],
-                rows: list[dict[str, Any]], day: str) -> str:
+                rows: list[dict[str, Any]], day: str,
+                records: dict[str, list[dict[str, Any]]] | None = None) -> str:
     """What a grade would be computed from: the records, the Data Register LISTING
     (each file's id and checksum — a replaced file changes it), the news, the day
     (days-in-stage moves daily). Equal fingerprints → the same grade.
@@ -128,7 +172,7 @@ def fingerprint(panorama: dict[str, Any], news: list[dict[str, Any]],
     import json as _json
 
     p = {k: v for k, v in (panorama or {}).items() if k != "generated_at"}
-    body = {"day": day, "panorama": p,
+    body = {"day": day, "panorama": p, "records": records or {},
             "news": sorted(str(n.get("headline")) for n in news or []),
             "documents": sorted((str(d.get("id")), str(d.get("checksum") or d.get("size_bytes")),
                                  str(d.get("updated_at") or ""), str(d.get("section")),
@@ -164,6 +208,111 @@ def clip_middle(text: str, room: int) -> str:
     head = max(0, (room - len(mark)) * 2 // 3)
     tail = max(0, room - len(mark) - head)
     return text[:head] + mark + (text[-tail:] if tail else "")
+
+
+# What a file's FIRST pages say it is, when its name does not ("REPORT (2)", "W-630215792").
+_KIND_OF_TEXT = (("bank statement", r"prism ledger summary|statement of account|account statement"
+                                    r"|opening balance.{0,200}(?:withdrawal|debit)"),
+                 ("credit bureau report", r"credit information report|commercial credit report"
+                                          r"|\bcibil\b|\bcmr\b|credit score"),
+                 ("income tax return", r"income tax return|\bitr-\d|assessment year"),
+                 ("financial statements", r"balance sheet as (?:at|on)|statement of profit"
+                                          r"|profit (?:and|&) loss"),
+                 ("sanction letter", r"sanction letter|pleased to sanction|sanctioned limit"),
+                 ("net worth statement", r"net ?worth"),
+                 ("constitution / registration", r"partnership deed|certificate of (?:incorporation"
+                                                 r"|registration)|udyam|registration certificate"),
+                 ("legal / litigation report", r"litigation|court cases?|ecourts"),
+                 ("KYC", r"permanent account number|income tax department|aadhaa?r"))
+# Only where a section holds ONE kind: "Banking & Debt" holds statements AND sanction
+# letters, and calling a letter a statement would vouch for bank data that is not there.
+_SECTION_KIND = {"kyc": "KYC", "fin": "financial statements"}
+
+
+def kind_of(name: str, section: str = "", text: str = "") -> str | None:
+    """A file's kind: from its name ("BOI - …_BSA_Report" → bank statement analysis),
+    else from what its first pages say, else from its Data Register section. Names are
+    read as words — "_Cons_CIR_" and "a7ba_BSA_" hide theirs behind underscores."""
+    words = " " + re.sub(r"[^a-z0-9&]+", " ", (name or "").lower()) + " "
+    if (k := next((k for k, rx in _KIND_OF_NAME if re.search(rx, words)), None)):
+        return k
+    head = (text or "")[:6000].lower()
+    if head and (k := next((k for k, rx in _KIND_OF_TEXT if re.search(rx, head, re.S)), None)):
+        return k
+    sec = (section or "").lower()
+    return next((v for code, v in _SECTION_KIND.items()
+                 if sec == code or section_name(code).lower() == sec), None)
+
+
+def kinds_read(fates: list[dict[str, Any]]) -> dict[str, list[str]]:
+    """{kind: the files of that kind the grade READ} — a statement and its analysis
+    answer the same question, so each counts for the other."""
+    out: dict[str, list[str]] = {}
+    for f in fates:
+        if f.get("used") and (k := f.get("kind") or kind_of(f["name"], f.get("section") or "")):
+            out.setdefault(k, []).append(f["name"])
+    bank = out.get("bank statement", []) + out.get("bank statement analysis", [])
+    if bank:
+        out["bank statement"] = out["bank statement analysis"] = bank
+    return out
+
+
+def clean_record(row: dict[str, Any]) -> dict[str, Any]:
+    """A Register record as the model reads it: no ids or audit plumbing, long text
+    clipped to its first ``_RECORD_FIELD_MAX`` characters (an interaction's notes are
+    the desk's own words — 1,500 characters, not the panorama's 300)."""
+    out = {}
+    for k, v in row.items():
+        if k in _DROP or v in (None, "", [], {}):
+            continue
+        out[k] = v[:_RECORD_FIELD_MAX] + "…" if isinstance(v, str) and len(v) > _RECORD_FIELD_MAX \
+            else v
+    return out
+
+
+def fit_records(records: dict[str, list[dict[str, Any]]],
+                total: int = _RECORDS_TOTAL) -> tuple[dict[str, list[dict[str, Any]]], list[str]]:
+    """(the records within ``total`` characters, notes) — every kind keeps its newest
+    rows; the oldest are dropped first, round-robin, and the count is named."""
+    import json as _json
+
+    sizes = {k: [len(_json.dumps(r, default=str)) for r in rows] for k, rows in records.items()}
+    keep = {k: len(rows) for k, rows in records.items()}
+
+    def used() -> int:
+        return sum(sum(sizes[k][:keep[k]]) for k in keep)
+
+    while used() > total and any(keep.values()):
+        k = max(keep, key=lambda x: (sum(sizes[x][:keep[x]]), x))
+        keep[k] -= 1
+    notes = [f"{k}: {len(records[k]) - keep[k]} oldest of {len(records[k])} left out (budget)"
+             for k in records if keep[k] < len(records[k])]
+    return {k: rows[:keep[k]] for k, rows in records.items()}, notes
+
+
+def grade_claims_missing(grade: dict[str, Any], kinds: dict[str, list[str]]) -> list[str]:
+    """Where the grade's own words call a kind of document missing or empty while the
+    grade read one — the CAM review's "bank statements not captured", checked the same
+    way (cam_pipeline.claims_missing) on every reason and evidence line."""
+    lines: list[str] = []
+
+    def walk(v: Any) -> None:
+        if isinstance(v, str):
+            lines.append(v)
+        elif isinstance(v, dict):
+            for x in v.values():
+                walk(x)
+        elif isinstance(v, list):
+            for x in v:
+                walk(x)
+
+    walk({k: v for k, v in grade.items()
+          if k not in ("inputs", "evidence", "usage", "data_gaps")})
+    # A data gap IS an absence claim, whatever its wording ("BOI sanction letter for the
+    # ₹2.5 Cr facility" — listed as a gap while the letters were read).
+    lines += [f"Missing {g}" for g in grade.get("data_gaps") or [] if isinstance(g, str)]
+    text = "\n".join(lines)
+    return _uniq(claims_missing(text, kinds)) if text and kinds else []
 
 
 def section_name(value: Any) -> str:
@@ -285,6 +434,16 @@ def report_markdown(g: dict[str, Any]) -> str:
                          f"{_cell(read)} | {_cell(unread)} |")
         lines += ["", "*Checked by PRISM:* the file's key fields were read by PRISM itself, "
                   "not only by the model.", ""]
+    inputs = g.get("inputs") or {}
+    rec = inputs.get("records") or {}
+    if rec:
+        lines += ["**Also read from the Register:** "
+                  + "; ".join(f"{n} {k}" for k, n in rec.items())
+                  + (f" ({inputs['record_note']})" if inputs.get("record_note") else "") + ".", ""]
+    if inputs.get("claims_missing"):
+        lines += ["> **Check:** the grade calls these missing, but PRISM read them — verify "
+                  "before relying on that part of the reasoning:", ""]
+        lines += [f"> - {_cell(x)}" for x in inputs["claims_missing"]] + [""]
 
     if ev:
         lines += ["## 2. Red flags", ""]
@@ -388,9 +547,10 @@ def mount_risk_grade(app: Any, settings: Any, *, denied: Any, verified_email: An
     chitti_url = (getattr(settings, "chitti_url", "") or "").rstrip("/")
     docrag_url = (getattr(settings, "docrag_url", "") or "").rstrip("/")
     pulse_url = (getattr(settings, "pulse_url", "") or "").rstrip("/")
-    sections = {section_name(s) for s in str(getattr(settings, "risk_grade_doc_sections",
-                                                     "Financials,Banking & Debt")).split(",")
-                if s.strip()}
+    wanted_sections = str(getattr(settings, "risk_grade_doc_sections", "all") or "all")
+    # None = every section ("all", the default); else the named ones only.
+    sections: set[str] | None = (None if wanted_sections.strip().lower() in ("all", "*") else
+                                 {section_name(s) for s in wanted_sections.split(",") if s.strip()})
     doc_max = int(getattr(settings, "risk_grade_doc_max_chars", 40_000))
     docs_total = int(getattr(settings, "risk_grade_docs_total_chars", 160_000))
     cache: dict[str, tuple[float, dict]] = {}
@@ -460,27 +620,71 @@ def mount_risk_grade(app: Any, settings: Any, *, denied: Any, verified_email: An
         cached = bool(body.get("cached") or (body.get("telemetry") or {}).get("cached"))
         return md, (None if md.strip() else "no text could be read"), engines, cached
 
+    async def _register_list(request: Request, caller: Any, who: str, path: str,
+                             params: dict[str, Any], cap: int) -> tuple[list[dict], str | None]:
+        """Every row of a Register list (paged by cursor, the API's 100 a page) up to
+        ``cap``, read AS the caller. A page that fails ends the read and says so — the
+        rows before it are kept, never presented as the whole list."""
+        rows: list[dict] = []
+        cursor: str | None = None
+        while len(rows) < cap:
+            q = {**params, "limit": 100, **({"cursor": cursor} if cursor else {})}
+            try:
+                r = await request.app.state.http.get(
+                    f"{base}{path}", params=q, headers=reg_headers(request, caller, who, "GET", path))
+            except httpx.HTTPError as exc:
+                return rows, f"unreachable ({exc.__class__.__name__})"
+            if r.status_code >= 300:
+                return rows, f"refused the list (HTTP {r.status_code})"
+            body = r.json() or {}
+            rows += body.get("items", []) if isinstance(body, dict) else body
+            cursor = body.get("next_cursor") if isinstance(body, dict) else None
+            if not cursor:
+                break
+        return rows[:cap], None
+
+    async def _records(request: Request, caller: Any, who: str,
+                       entity_id: str | None) -> tuple[dict[str, list[dict]], list[str]]:
+        """The Register's records about the company that the panorama only summarises —
+        each read as the caller (a role that cannot see one gets a named gap)."""
+        if not entity_id:
+            return {}, []
+        notes: list[str] = []
+
+        async def one(kind: str) -> tuple[str, list[dict]]:
+            path, cap, extra = _RECORDS[kind]
+            rows, err = await _register_list(request, caller, who, path,
+                                             {"entity_id": entity_id, **extra}, cap)
+            if err is not None:
+                notes.append(f"{kind}: {err}")
+            if kind == "intelligence":
+                rows = [r for r in rows if not r.get("is_dismissed")]
+            stamp = {"interactions": "occurred_at", "intelligence": "observed_at",
+                     "financials": "period_end", "monitoring": "due_date"}[kind]
+            rows.sort(key=lambda r: str(r.get(stamp) or r.get("created_at") or ""), reverse=True)
+            return kind, [clean_record(r) for r in rows]
+
+        got = dict(await asyncio.gather(*(one(k) for k in _RECORDS)))
+        fitted, cut = fit_records(got)
+        return fitted, notes + cut
+
     async def _doc_rows(request: Request, caller: Any, who: str,
                         entity_id: str | None) -> tuple[list[dict], str | None]:
         """(the Data Register files the grade reads, in read order; note). The listing
         only — cheap, so a regrade can tell "nothing new" before reading any file."""
         if not entity_id:
             return [], "no client master record — the Data Register is not linked"
-        path = "/v1/documents"
-        try:
-            r = await request.app.state.http.get(
-                f"{base}{path}?entity_id={entity_id}&limit=100",
-                headers=reg_headers(request, caller, who, "GET", path))
-        except httpx.HTTPError as exc:
-            return [], f"Data Register unreachable ({exc.__class__.__name__})"
-        if r.status_code >= 300:
-            return [], f"Data Register refused the list (HTTP {r.status_code})"
-        rows = [d for d in (r.json() or {}).get("items", [])
-                if section_name(d.get("section")) in sections
+        listed, err = await _register_list(request, caller, who, "/v1/documents",
+                                           {"entity_id": entity_id}, 1000)
+        if err is not None:
+            return [], f"Data Register: {err}"
+        rows = [d for d in listed
+                if (sections is None or section_name(d.get("section")) in sections)
                 and (d.get("status") or "") not in _SKIP_STATUS
                 and (d.get("original_filename") or d.get("storage_uri") or d.get("size_bytes"))]
         if not rows:
-            return [], f"no files on the Data Register in {', '.join(sorted(sections))}"
+            return [], ("no files on the Data Register" if sections is None else
+                        f"no files on the Data Register in {', '.join(sorted(sections))}")
         # The same file uploaded into two slots is read once.
         unique: dict[tuple[str, Any], dict] = {}
         for d in sorted(rows, key=read_order):
@@ -488,8 +692,8 @@ def mount_risk_grade(app: Any, settings: Any, *, denied: Any, verified_email: An
                                d.get("checksum") or d.get("size_bytes")), d)
         return list(unique.values()), None
 
-    async def _documents(request: Request, caller: Any, who: str,
-                         rows: list[dict]) -> tuple[list[dict], list[dict], list[dict]]:
+    async def _documents(request: Request, caller: Any, who: str, rows: list[dict],
+                         keep_full: bool = False) -> tuple[list[dict], list[dict], list[dict]]:
         """(texts for the grader, every file's fate, the facts PRISM read itself).
         Nothing is copied anywhere — text travels, with ID numbers masked. A zip is
         opened and each file in it read and listed on its own ("Bank Statements.zip /
@@ -541,10 +745,43 @@ def mount_risk_grade(app: Any, settings: Any, *, denied: Any, verified_email: An
         facts = [x for f, t in read if t.strip()
                  for x in facts_of(f["name"].rsplit(" / ", 1)[-1], t)]
         read = [(f, t) for f, t in read if t.strip()]
+        # Prepared as the CAM prepares them: ledgers summed by PRISM, workbooks' short
+        # sheets first, a file whose text another already has read once.
+        prepared: list[tuple[dict, str]] = []
+        seen_text: dict[str, str] = {}
+        for f, t in read:
+            key = re.sub(r"\s+", " ", t).strip()
+            if key in seen_text:
+                f["reason"] = f"identical to '{seen_text[key]}' — read once"
+                continue
+            seen_text[key] = f["name"]
+            said = []
+            t, note = summarise_ledgers(t)
+            f["kind"] = kind_of(f["name"], f.get("section") or "", t)
+            said += [note] if note else []
+            if "## Sheet:" in t:
+                t, note = focus_workbook(t)
+                said += [note] if note else []
+            if said:
+                f["prepared"] = "; ".join(said)
+            prepared.append((f, t))
+        read = prepared
         # Most-telling kinds first (actuals before projections, newest year first):
         # the AI host takes at most _MAX_SENT files, and the rest are named, not dropped.
         read.sort(key=lambda ft: read_order({"title": ft[0].get("title"),
                                              "original_filename": ft[0]["name"]}))
+        if keep_full:
+            # The full report reads every file whole (into fact sheets, as the CAM does):
+            # nothing is clipped or capped here.
+            whole: list[dict] = []
+            for f, full in read:
+                said = [x for x in (f.pop("prepared", None),) if x]
+                f.update(used=True, chars=len(full), **({"note": "; ".join(said)} if said else {}))
+                # Unmasked: this text goes to the CAM engine (as the CAM's does, so the
+                # fact sheets are shared); what reaches the AI host is masked there.
+                whole.append({"name": f["name"], "section": f["section"], "title": f["title"],
+                              "engines": f["engines"], "text": full})
+            return whole, fates, facts
         for f, _t in read[_MAX_SENT:]:
             f["reason"] = (f"not sent: one grade reads at most {_MAX_SENT} files, and "
                            "higher-priority kinds came first")
@@ -553,25 +790,28 @@ def mount_risk_grade(app: Any, settings: Any, *, denied: Any, verified_email: An
         texts: list[dict] = []
         for (f, full), room in zip(read, shares, strict=True):
             text = clip_middle(mask_ids(full), room)
-            f.update(used=True, chars=len(text),
-                     **({"note": f"clipped: {len(text):,} of {len(full):,} characters, "
-                                 "beginning and end kept"} if len(full) > room else {}))
+            notes = [x for x in (f.pop("prepared", None),
+                                 f"clipped: {len(text):,} of {len(full):,} characters, "
+                                 "beginning and end kept" if len(full) > room else None) if x]
+            f.update(used=True, chars=len(text), **({"note": "; ".join(notes)} if notes else {}))
             texts.append({"name": f["name"], "section": f["section"], "title": f["title"],
                           "engines": f["engines"], "text": text})
         return texts, fates, facts
 
     # ------------------------------------------------------------------ PULSE
     async def _pulse(request: Request, p: dict, company: str) -> tuple[list[dict], str | None]:
-        """The firm's and its key people's news, PULSE's verdicts, last 90 days."""
+        """The firm's and its key people's news, PULSE's verdicts, last 12 months —
+        a default or a raid 100 days ago is as much the grade's business as last week's."""
         if not pulse_url:
             return [], "PULSE not configured"
         s = p.get("stats") or {}
         live = "live" if (s.get("deals_in_flight") or 0) + (s.get("deals_done") or 0) else ""
-        since = (datetime.now(UTC).date() - timedelta(days=90)).isoformat()
-        people = [c.get("name") for c in (p.get("contacts") or []) if c.get("name")][:3]
+        since = (datetime.now(UTC).date() - timedelta(days=365)).isoformat()
+        people = list(dict.fromkeys(c.get("name") for c in (p.get("contacts") or [])
+                                    if c.get("name")))[:6]
         core = name_core(company) or company
         # Exact-phrase searches; every hit is then checked to actually name the firm/person.
-        terms = [(f'"{core}"', company, 20)] + [(f'"{n}"', n, 6) for n in people]
+        terms = [(f'"{core}"', company, 30)] + [(f'"{n}"', n, 8) for n in people]
         out: list[dict] = []
         seen: set[str] = set()
         failures = 0
@@ -600,7 +840,7 @@ def mount_risk_grade(app: Any, settings: Any, *, denied: Any, verified_email: An
                             "about": about if person else None})
         if failures == len(terms):
             return [], "PULSE unreachable"
-        return out[:40], (f"{failures} PULSE search(es) failed" if failures else None)
+        return out[:80], (f"{failures} PULSE search(es) failed" if failures else None)
 
     def _key(entity_id: str | None, company: str, restricted: list[str]) -> str:
         return f"{entity_id or company.strip().lower()}|{','.join(sorted(restricted))}"
@@ -697,17 +937,18 @@ def mount_risk_grade(app: Any, settings: Any, *, denied: Any, verified_email: An
                      who: str, caller: Any, key: str) -> tuple[dict, Any]:
         company = (p.get("anchor") or {}).get("name") or payload.company
         entity_id = payload.entity_id or (p.get("anchor") or {}).get("entity_id")
-        (rows, doc_note), (news, news_note) = await asyncio.gather(
-            _doc_rows(request, caller, who, entity_id), _pulse(request, p, company))
+        (rows, doc_note), (news, news_note), (records, record_notes) = await asyncio.gather(
+            _doc_rows(request, caller, who, entity_id), _pulse(request, p, company),
+            _records(request, caller, who, entity_id))
         if not news and news_note:
             # PULSE could not be asked from here: fall back to what the dialog showed.
             news = [n.model_dump() for n in payload.news]
             if news:
                 news_note = f"{news_note}; the dialog's 30-day news used instead"
         elif not news:
-            news_note = "no headlines naming the firm or its people in the last 90 days"
+            news_note = "no headlines naming the firm or its people in the last 12 months"
         trimmed = trim_panorama(p)
-        fp = fingerprint(trimmed, news, rows, datetime.now(UTC).date().isoformat())
+        fp = fingerprint(trimmed, news, rows, datetime.now(UTC).date().isoformat(), records)
         prior = last_read.get(key)
         if prior and prior[0] == fp:
             # Nothing the grade reads has changed since the last one: the same grade,
@@ -730,8 +971,11 @@ def mount_risk_grade(app: Any, settings: Any, *, denied: Any, verified_email: An
         for row in trimmed.get("documents") or []:
             if isinstance(row, dict) and (fn := str(row.get("filename") or "").lower()) in fate_of:
                 row["read_by_grade"] = "yes" if fate_of[fn] else "NO — not evidence"
+        kinds = kinds_read(fates)
         sent = {"company": company, "panorama": trimmed, "news": news, "documents": docs,
+                "records": records,
                 "facts": {"flags": flags, "key_figures": figures, "unread_files": unread,
+                          "kinds_read": kinds,
                           "bureau_scores": [{"person": f["person"], "score": f["score"]}
                                             for f in facts if f["kind"] == "cir"],
                           "read_files": [f["name"] for f in fates if f.get("used")],
@@ -763,7 +1007,14 @@ def mount_risk_grade(app: Any, settings: Any, *, denied: Any, verified_email: An
                                e.get("detail") or f"HTTP {r.status_code} from the AI host.")
         grade = r.json()
         inputs = {**(grade.get("inputs") or {}), "documents": fates,
-                  "news_note": news_note}
+                  "news_note": news_note,
+                  "records": {k: len(v) for k, v in records.items()},
+                  **({"record_note": "; ".join(record_notes)} if record_notes else {})}
+        # The CAM review's check, on the grade: a kind of document it read but calls
+        # missing. Named on the grade (and its report), never silently passed.
+        said_missing = grade_claims_missing(grade, kinds)
+        if said_missing:
+            inputs["claims_missing"] = said_missing
         if doc_note:
             inputs["document_note"] = doc_note
         log.info("risk_grade", extra={"company": company, "rating": grade.get("label"),
@@ -782,3 +1033,268 @@ def mount_risk_grade(app: Any, settings: Any, *, denied: Any, verified_email: An
         else:
             last_read[key] = (fp, result)
         return result, None
+
+    # ------------------------------------------------------------------ the IRG report
+    # The full report: the CAM's reading and dataset, the rubric's grade on the fact
+    # sheets, and one section per pillar explaining it (app.irg). Minutes, so a job.
+    full_jobs: dict[str, dict[str, Any]] = {}
+    full_tasks: set[asyncio.Task] = set()
+
+    async def _ask_chitti(request: Any, sent: dict[str, Any]) -> tuple[dict | None, str | None]:
+        http = getattr(request.app.state, "docrag_http", None) or request.app.state.http
+        try:
+            r = await http.post(f"{chitti_url}/v1/risk-grade",
+                                headers={"X-API-Key": settings.chitti_api_key,
+                                         "X-Tenant": request.headers.get("X-Tenant",
+                                                                         settings.register_tenant)},
+                                json=sent, timeout=float(getattr(settings, "chitti_timeout_s", 300.0)))
+        except httpx.HTTPError as exc:
+            return None, f"the AI host did not answer ({exc.__class__.__name__})"
+        if r.status_code >= 300:
+            try:
+                e = (r.json() or {}).get("error") or {}
+            except ValueError:
+                e = {}
+            return None, f"{e.get('title') or 'grading failed'}: {e.get('detail') or r.status_code}"
+        return r.json(), None
+
+    async def _cam_master(request: Any, caller: Any, who: str) -> Any:
+        """The tenant's CAM master prompt (its rules make the fact sheets the CAM's own,
+        cached), or None — the IRG then uses its own fallback rules."""
+        from app.cam_pipeline import parse_master_prompt
+
+        try:
+            path = "/v1/templates/cam_prompt"
+            t = await request.app.state.http.get(f"{base}{path}",
+                                                 headers=reg_headers(request, caller, who, "GET", path))
+            tid = (t.json() or {}).get("id") if t.status_code < 300 else None
+            if not tid:
+                return None
+            cpath = f"/v1/documents/{tid}/content"
+            c = await request.app.state.http.get(
+                f"{base}{cpath}", headers=reg_headers(request, caller, who, "GET", cpath),
+                follow_redirects=True, timeout=60.0)
+            if c.status_code >= 300:
+                return None
+            text, _why = extract_text(c.headers.get("content-type") or "", c.content)
+            return parse_master_prompt(text)
+        except (httpx.HTTPError, ValueError):
+            return None
+
+    def _report_store() -> Any:
+        from pathlib import Path
+
+        d = getattr(settings, "cam_digest_cache_dir", "") or ""
+        return Path(d) / "irg" if d else None
+
+    def _stored(fp: str) -> dict | None:
+        store = _report_store()
+        try:
+            return json.loads((store / f"{fp}.json").read_text()) if store else None
+        except (OSError, ValueError):
+            return None
+
+    def _store(fp: str, value: dict) -> None:
+        store = _report_store()
+        if store is None:
+            return
+        try:
+            store.mkdir(parents=True, exist_ok=True)
+            tmp = store / f".{fp}.tmp"
+            tmp.write_text(json.dumps(value, default=str))
+            tmp.replace(store / f"{fp}.json")
+        except OSError as exc:
+            log.warning("irg_report_store_failed", extra={"error": str(exc)})
+
+    async def _run_full(job: dict[str, Any], ctx: Any, caller: Any, who: str,
+                        p: dict, company: str, entity_id: str | None,
+                        gathered: tuple, fp: str) -> None:
+        from app import irg
+        from app.cam import _SYSTEM, build_engine
+        from app.cam_pipeline import DigestCache, SourceDoc, draft_staged, qa_markdown
+
+        def progress(stage: str, done: int, total: int) -> None:
+            job.update(stage=stage, done=done, total=total, updated=time.time())
+
+        try:
+            progress("Reading the file", 0, 1)
+            (rows, doc_note), (news, news_note), (records, record_notes) = gathered
+            texts, fates, facts = (await _documents(ctx, caller, who, rows, keep_full=True)
+                                   if rows else ([], [], []))
+            flags, figures = flags_from(facts), key_figures(facts)
+            kinds = kinds_read(fates)
+            docs = [SourceDoc(f"d{n}", t["name"], t["text"], t.get("section") or "", None)
+                    for n, t in enumerate(texts) if t["text"].strip()]
+            if not docs:
+                raise RuntimeError("no file on the Data Register could be read"
+                                   + (f" ({doc_note})" if doc_note else ""))
+            engine = build_engine(settings)
+            cam_prompt = await _cam_master(ctx, caller, who)
+            prompt = irg.irg_prompt(cam_prompt)
+            trimmed = trim_panorama(p)
+            unread = sorted({f.get("in_zip") or f["name"] for f in fates if not f.get("used")})
+            facts_sent = {"flags": flags, "key_figures": figures, "unread_files": unread,
+                          "kinds_read": kinds,
+                          "bureau_scores": [{"person": f["person"], "score": f["score"]}
+                                            for f in facts if f["kind"] == "cir"],
+                          "read_files": [f["name"] for f in fates if f.get("used")],
+                          "triggers": [{"clause": f["trigger"],
+                                        "evidence": f"{f['title']} — {f['detail']} ({f['source']})"}
+                                       for f in flags if f.get("trigger")]}
+
+            async def grade_step(typed: list[tuple[str, str]], dataset: str, res: Any) -> str:
+                sent = {"company": company, "panorama": trimmed, "news": news,
+                        "documents": irg.documents_for_grade(typed, dataset),
+                        "records": records, "facts": facts_sent}
+                g, why = await _ask_chitti(ctx, sent)
+                if g is None:
+                    raise RuntimeError(f"The rubric could not grade: {why}")
+                res.extra["grade"] = g
+                return irg.grade_context(g)
+
+            public = "\n".join(
+                [f"PULSE news (12 months): {len(news)} headline(s) naming the firm or its "
+                 "people" + (f" — {news_note}" if news_note else "")]
+                + [f"  - {n.get('when')} · {n.get('headline')} — {n.get('source')} · "
+                   f"{n.get('severity') or 'untagged'}" for n in news[:40]]
+                + ["Intelligence on the Register (not dismissed):"]
+                + [f"  - {r.get('observed_at') or '?'} · {r.get('source') or '?'} · "
+                   f"{r.get('signal') or '—'} · {r.get('title')}"
+                   for r in records.get("intelligence") or []][:60])
+            notes = json.dumps({"interactions": records.get("interactions") or [],
+                                "monitoring": records.get("monitoring") or [],
+                                "financials_on_register": records.get("financials") or []},
+                               ensure_ascii=False, default=str)[:60_000]
+            http = ctx.app.state.http
+            effort = (getattr(settings, "cam_digest_reasoning_effort", "") or None
+                      if "reasoning_effort" in getattr(engine, "extra_body", {}) else None)
+            res = await draft_staged(
+                generate=lambda sys, t, **kw: engine.generate(http, sys, t, **kw),
+                system=_SYSTEM, prompt=prompt, docs=docs,
+                analyst_notes=f"The Register's own records about the company:\n{notes}",
+                cache=DigestCache(directory=getattr(settings, "cam_digest_cache_dir", "") or None),
+                model_id=engine.name, progress=progress,
+                concurrency=int(getattr(settings, "cam_pipeline_concurrency", 8)),
+                call_budget=int(getattr(settings, "cam_call_budget_chars", 360_000)),
+                digest_part_chars=int(getattr(settings, "cam_digest_part_chars", 90_000)),
+                deal_context=irg.deal_text(p), public_context=public, retry_delay_s=10.0,
+                digest_effort=effort, doc_title=irg.IRG_TITLE, interlude=grade_step,
+                section_effort=((getattr(settings, "irg_section_reasoning_effort", "") or None)
+                                if effort else None),
+                light_dataset=True)
+            g = res.extra.get("grade") or {}
+            # A file the reading left out as redundant (covered by an analysis, an older
+            # extract, a consent form) is on record but not read — and says why.
+            left_out = {n["document"]: n["note"] for n in res.notes if n.get("skipped")}
+            for f in fates:
+                if f["name"] in left_out:
+                    f.update(used=False, reason=left_out[f["name"]].removeprefix("not read: "))
+            workpaper = res.workpaper_md.split("## Machine QA report")[0]
+            md = irg.assemble(res.draft_md, g, flags, irg.appendix_md(
+                g, fates, kinds, {k: len(v) for k, v in records.items()},
+                qa_markdown(res.qa), workpaper))
+            said_missing = grade_claims_missing(g, kinds)
+            inputs = {**(g.get("inputs") or {}), "documents": fates, "news_note": news_note,
+                      "records": {k: len(v) for k, v in records.items()},
+                      **({"record_note": "; ".join(record_notes)} if record_notes else {}),
+                      **({"claims_missing": said_missing} if said_missing else {})}
+            grade = {**g, "inputs": inputs, "generated_by": who, "entity_id": entity_id,
+                     "unchanged": False, "evidence": {
+                         "flags": flags, "key_figures": figures,
+                         "coverage": coverage(fates, facts, len(news), news_note)}}
+            # The full report's grade is the company's grade too (Company 360 shows it).
+            cache[_key(entity_id, company, p.get("restricted") or [])] = (time.monotonic(), grade)
+            job.update(status="done", stage="Done", grade=grade, report_md=md, qa=res.qa,
+                       calls=res.calls, notes=res.notes, finished=time.time())
+            if not any(f.get("transient") for f in fates):
+                # Nothing on file changes → the next request is answered from this.
+                _store(fp, {"grade": grade, "report_md": md, "qa": res.qa,
+                            "generated": time.time()})
+            log.info("irg_report", extra={"company": company, "rating": g.get("label"),
+                                          "score": g.get("score"), "calls": res.calls,
+                                          "seconds": round(time.time() - job["started"])})
+        except Exception as exc:  # noqa: BLE001 — the job reports it; nothing half-filed
+            log.warning("irg_report_failed", extra={"company": company, "error": str(exc)})
+            job.update(status="failed", error=str(exc), finished=time.time())
+
+    def _full_view(job: dict[str, Any]) -> dict[str, Any]:
+        return {k: v for k, v in job.items() if not k.startswith("_")}
+
+    @app.post("/v1/panorama/risk-grade/full", status_code=202, tags=["Company 360"],
+              summary="The IRG report: the CAM's reading + the rubric's grade, explained (job)")
+    async def risk_grade_full(payload: RiskGradeIn, request: Request) -> Any:
+        resp, who, caller = await _identity(request)
+        if resp is not None:
+            return resp
+        if not chitti_url:
+            return problem(409, "No grading service configured",
+                           "Set WORKFLOWS_CHITTI_URL and WORKFLOWS_CHITTI_API_KEY.")
+        p, err = await _panorama(request, caller, who, payload.entity_id, payload.company)
+        if err is not None:
+            return err
+        assert p is not None
+        import uuid as _uuid
+        from types import SimpleNamespace
+
+        company = (p.get("anchor") or {}).get("name") or payload.company
+        entity_id = payload.entity_id or (p.get("anchor") or {}).get("entity_id")
+        job_id = _uuid.uuid4().hex
+        job = {"job_id": job_id, "company": company, "entity_id": entity_id,
+               "status": "running", "stage": "Starting", "done": 0, "total": 0,
+               "started": time.time(), "_who": who.lower()}
+        # What the report would be built from — the listing, the records, the news, the
+        # day. A report built from exactly that is answered at once, not recomputed.
+        gathered = await asyncio.gather(_doc_rows(request, caller, who, entity_id),
+                                        _pulse(request, p, company),
+                                        _records(request, caller, who, entity_id))
+        (rows, _dn), (news, _nn), (records, _rn) = gathered
+        fp = fingerprint(trim_panorama(p), news, rows, datetime.now(UTC).date().isoformat(),
+                         records)
+        if not payload.refresh and (hit := _stored(fp)) is not None:
+            job.update(status="done", stage="Done", grade=hit["grade"],
+                       report_md=hit["report_md"], qa=hit.get("qa"), reused=True,
+                       finished=time.time())
+            full_jobs[job_id] = job
+            cache[_key(entity_id, company, p.get("restricted") or [])] = (time.monotonic(),
+                                                                        hit["grade"])
+            return {k: v for k, v in _full_view(job).items() if k != "report_md"}
+        for old in sorted(full_jobs.values(), key=lambda j: j["started"])[:-50]:
+            full_jobs.pop(old["job_id"], None)
+        full_jobs[job_id] = job
+        ctx = SimpleNamespace(headers=dict(request.headers), app=request.app)
+        task = asyncio.create_task(_run_full(job, ctx, caller, who, p, company, entity_id,
+                                             gathered, fp))
+        full_tasks.add(task)
+        task.add_done_callback(full_tasks.discard)
+        return {k: v for k, v in _full_view(job).items() if k != "report_md"}
+
+    def _own_job(job_id: str, who: str) -> dict[str, Any] | None:
+        job = full_jobs.get(job_id)
+        return job if job is not None and job.get("_who") == who.lower() else None
+
+    @app.get("/v1/panorama/risk-grade/full/{job_id}", tags=["Company 360"],
+             summary="Progress of an IRG report job; the grade and report when done")
+    async def risk_grade_full_job(job_id: str, request: Request) -> Any:
+        resp, who, _caller = await _identity(request)
+        if resp is not None:
+            return resp
+        job = _own_job(job_id, who)
+        if job is None:
+            return problem(404, "No such job", "That IRG report job is not yours or has expired.")
+        return _full_view(job)
+
+    @app.get("/v1/panorama/risk-grade/full/{job_id}/report", tags=["Company 360"],
+             summary="The IRG report as a Word document")
+    async def risk_grade_full_docx(job_id: str, request: Request) -> Any:
+        resp, who, _caller = await _identity(request)
+        if resp is not None:
+            return resp
+        job = _own_job(job_id, who)
+        if job is None or job.get("status") != "done":
+            return problem(404, "No report", "The IRG report is not ready (or not yours).")
+        blob = markdown_to_docx(job["report_md"], None, cam=True)
+        safe = "".join(ch if ch.isalnum() or ch in " -_" else "_" for ch in str(job["company"]))
+        return Response(content=blob, media_type=(
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+            headers={"Content-Disposition": f'attachment; filename="IRG report - {safe.strip()}'
+                                            f' - {date.today().isoformat()}.docx"'})

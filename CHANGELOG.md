@@ -6,6 +6,156 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **IRG report in minutes, with or without a CAM.** The first IRG report took 13 minutes,
+  9 of them re-building the financial dataset. Now: the locked dataset is cached like
+  the fact sheets (an IRG after a CAM, or a regrade, reuses it); without a CAM the IRG
+  builds a concise dataset (statements, locked figures, reconciliation — not the CAM's
+  stress tests and maps) at the same effort; the grade runs beside the dataset instead
+  of after it; the pillar sections are written at effort "low" (the rating summary and
+  the risks and recommendation keep "high"); and a report whose file, records and news
+  have not changed since the last one is answered at once ("refresh" forces a new one).
+  *Operator:* `WORKFLOWS_IRG_SECTION_REASONING_EFFORT` (default `low`). Reports are kept
+  on the camcache volume under `irg/`.
+
+- **CAM and IRG read the documents that matter, and say which they left out.** A real
+  file repeats itself (Pulze: 68 files, a third restating another). A file is now left
+  out only when that is provable, and named with the reason: a raw bank statement whose
+  every month a same-bank analysis covers (and, where both show an account number, the
+  same account), an older extract of an account a newer statement covers, a consent
+  form. Financials, ITRs, CMA, analyses, bureau, sanction letters, term sheet, legal,
+  ageing, orders, profile and KYC are always read; a statement whose months cannot be
+  proven is read. Pulze: 53 of 68 read, 15 named. A left-out statement still counts as
+  bank data on record.
+
+- **The IRG report: a superset of the CAM.** The grade read like a scorecard — each file
+  clipped to ~6,000 characters for the model, three risks and three mitigants, and an
+  appendix longer than the analysis. The new report ("Full IRG report" in Company 360,
+  `POST /v1/panorama/risk-grade/full` → job → `…/full/{id}/report`) runs the CAM's own
+  pipeline with IRG sections: every document read into the CAM's fact sheets (shared
+  cache — after a CAM the reading is instant), the financial dataset locked and PRISM's
+  ratios computed, then the rubric grades in Chitti on the fact sheets and the locked
+  dataset (identity numbers masked), and one section per pillar explains its score with
+  the evidence: rating summary, borrower and facility, financial analysis, banking and
+  bureau conduct, debt profile and security, market validation, news/legal/compliance,
+  documentation, engagement, sector, then risks, conditions and recommendation. PRISM
+  adds the scorecard, hard triggers and its own flags after the summary, and compact
+  appendices (score build, evidence by kind, machine QA, the financial workpaper). Word
+  output in the CAM's style with its own cover. Its grade becomes the company's grade.
+  *Operator:* nothing new to set — it uses the CAM engine, the CAM master prompt
+  (template `cam_prompt`) and the AI host's Chitti.
+
+- **CAM: about twice as fast.** A first Pulze CAM on Sarvam took 39 minutes, 70% of it
+  reading documents at reasoning effort "high" (459k output tokens, mostly reasoning, for
+  plain extraction), four calls at a time, and every deploy threw the fact sheets away.
+  Now documents are read at "low" (~12 s a part instead of ~90 s) while the dataset,
+  sections and repairs keep "high"; eight calls run at a time; fact sheets are kept on a
+  volume, so a re-draft on the same file goes straight to writing. *Operator:* new
+  `camcache` volume on the orchestrator; `WORKFLOWS_CAM_DIGEST_REASONING_EFFORT=low`,
+  `WORKFLOWS_CAM_PIPELINE_CONCURRENCY=8`, `WORKFLOWS_CAM_DIGEST_CACHE_DIR=/data/cam-cache`
+  (Helm: `api.cam.digestReasoningEffort`, `pipelineConcurrency`, `digestCacheDir`). If
+  Sarvam answers 429 under eight, lower the concurrency.
+
+- **DocRAG read every sheet of some workbooks as empty — the real cause of "empty
+  template" bank statements.** Report generators (bank-statement analysis vendors,
+  ScoreMe's legal and ITR reports) write `<dimension ref="A1"/>` on every sheet, and
+  openpyxl's read-only mode trusts it: each of Pulze's three BSA reports (6,000+ rows a
+  sheet) and the legal report came back `[empty sheet]` on every sheet, so every CAM and
+  grade read nothing from them. The reader now recomputes each sheet's extent from its
+  rows. *Operator:* nothing to do — spreadsheets carry their own cache version
+  (`SHEET_VERSION=2`), so cached workbooks are re-read on next use (free: no OCR) while
+  every OCR'd PDF keeps its cached result. Rebuild DocRAG on each host that runs one.
+- **CAM: a call that reasons away its whole budget is asked once more at effort "low".**
+  One 95-page statement spent all 32,000 tokens reasoning at "high" and its fact sheet
+  failed; that one request is now retried at "low" before it is named as failed.
+
+- **Risk grade (IRG): everything on record, prepared the CAM's way.** The grade read
+  four Data Register sections, the listing's first 100 rows, at most 40 files, the
+  panorama's 40 interactions clipped to 300 characters and 90 days of news. Now:
+  * *Every section* (`WORKFLOWS_RISK_GRADE_DOC_SECTIONS=all`, the new default — the term
+    sheet and company profile live in Deal Documents, orders in Project & Technical),
+    *every page* of the listing, up to 150 files to the AI host.
+  * *The Register's own records*, read as the caller: every interaction with its notes
+    (1,500 characters each — VOX captures, calls, meetings), the external intelligence
+    the news monitor filed (SEBI, IBBI, NSE, adverse news; dismissed rows left out),
+    the current financial statements and the monitoring records. Within 100k characters,
+    the oldest dropped first and counted. A new interaction or finding is a reason to
+    regrade (it is in the grade's fingerprint).
+  * *News for 12 months* (was 90 days), the firm and up to six of its people.
+  * *Files prepared as the CAM prepares them:* any bank's transaction listing summed
+    month by month by PRISM, workbooks' short sheets before bulk listings, a file whose
+    text another already has read once.
+  * *Never "missing" when read:* each file's kind (from its name, else its first pages,
+    else its section) is sent to the grader as "kinds of document READ — never call one
+    missing"; the grade's reasons are then checked the CAM's way, and a kind it calls
+    missing but read is named on the grade and in its Word report.
+  *Operator:* both sides must be deployed together — the orchestrator (workflows image)
+  sends `records` and up to 150 documents, which the AI host's Chitti must accept (an old
+  Chitti refuses the body with 422). Order: Chitti first, then the orchestrator.
+  `WORKFLOWS_RISK_GRADE_DOC_SECTIONS` narrows it again (e.g. `Financials,Banking & Debt`).
+
+- **CAM: the credit team's review of the first Pulze CAM, and the move to Sarvam
+  glm5.3.** The drafting engine now runs on Sarvam's `glm5.3` at reasoning effort
+  `high` (was GLM on Bedrock). The staged drafter fixes what the review found:
+  * *Bank statements and GST were "not captured".* A bank-statement analysis workbook
+    (~1.1M characters) was read in page-sized parts from its raw ledger, the month-wise
+    overview, cheque returns and EOD sheets were never reached, and the CAM called three
+    real reports "empty templates". Workbooks are now read summary sheets first; a raw
+    ledger sheet keeps its first 40 rows and is named on the document's fate ("not read
+    line by line — the workbook's summary sheets cover it"). Fact sheets give banking
+    and GST month by month (credits, debits, balances, returns, EMIs, GST paid), never
+    transaction by transaction. A draft takes up to 150 documents (was 60).
+  * *Each section reads its own documents whole.* Every fact sheet states its document
+    type; Section 7 keeps the bank, GST and ITR fact sheets unclipped, Section 5 the
+    financials, Section 2 the KYC and bureau reports, and so on — the rest share what
+    is left. The company profile's full text goes to the profile, business-model,
+    industry and page-1 writers (the review: "information in source documents missed").
+  * *Terms match the term sheet.* The term sheet's full text reaches every part that
+    states terms, with the rule that terms are quoted, never paraphrased, extended or
+    supplied; the appendix IS the term sheet transcribed (no invented covenants, events
+    of default or pricing summary). Machine QA fails "Appendix terms match the term
+    sheet" for a figure the term sheet lacks or a row it never words that way.
+  * *Financial data errors.* Balance-sheet identities are checked on the locked figures
+    (TOL equal to current liabilities with term debt on the books, term debt equal to
+    WC debt, PAT above PBDIT, receivables + inventory above current assets …); a break
+    sends the dataset back once to re-read its sources, and the correction is kept only
+    if it breaks fewer. Every section's table figures and prose amounts are traced to
+    the sources (lakh/crore/rupee conversions allowed, totals are the section's own);
+    figures no source has go back to the writer once, and what survives is named in
+    Machine QA ("Figures traced to the sources").
+  * *Citations, annexures, public checks.* One "Source:" line under each table instead
+    of a tag in every cell (and no Source column); one merged tag per prose line.
+    Annexure rows that are only "not on record" / NA go, and sub-sections that cannot
+    apply (shareholding for a partnership) are named in one line. Public checks PRISM
+    could not perform become one line for the analyst ("Litigation ×5; LinkedIn ×4").
+  * *Word tables.* Full page width, columns sized to their content, 9 pt on tight
+    spacing, header row repeated on each page, rows never split, figures right-aligned,
+    the source line small and grey.
+  * *Not just Pulze's shapes.* Any transaction listing — a bank statement PDF of any
+    bank, a BSA's raw sheet, a ledger — is found by its header (a date column and a
+    debit/credit column, repeated across PDF pages), not by a vendor's sheet names, and
+    PRISM sums it month by month itself (credits, debits, closing/lowest/highest
+    balance, returns, largest credits). Checked on Pulze's BOI BSA: equal to the
+    vendor's own month-wise overview to the rupee. A row whose columns slipped (a "|"
+    in a narration) is never summed: the summary says PARTIAL and how many rows it left
+    out, and past 5% it is not summarised at all. Workbooks put short sheets before bulk
+    listings by shape. A section that calls a kind of document missing or empty while
+    one was read (bank data, GST, ITR, bureau, legal, ageing, orders …) is sent back
+    once and fails Machine QA if it persists; a fact sheet that calls a figure-heavy
+    document "empty" is re-read once. A document uploaded twice is read once. Prose
+    amounts are traced at any size ("the first Rs. 2 crore facility" was a prompt
+    exemplar's figure). The dataset step is told that an ITR's assessment year is the
+    next financial year, and never to mix standalone/consolidated or audited/provisional
+    in one column. No term sheet among the documents is a Machine QA warning.
+  *Operator:* Compose now defaults `WORKFLOWS_CAM_ENGINE=sarvam:glm5.3` with
+  `WORKFLOWS_SARVAM_BASE_URL=https://api.sarvam.ai/v2`, `WORKFLOWS_SARVAM_MAX_TOKENS=32000`
+  and the new `WORKFLOWS_SARVAM_REASONING_EFFORT=high` (low | high | max; glm5.3 answers
+  nothing without one). It uses the existing `SARVAM_API_KEY` — check it is set on the
+  host (`${#SARVAM_API_KEY}`). The CP/CS reads and sanction-letter drafts use the same
+  engine. Back to Bedrock: `WORKFLOWS_CAM_ENGINE=bedrock:zai.glm-5`. Helm:
+  `workflows.api.cam.sarvam.{baseUrl,maxTokens,reasoningEffort,apiKey}` (engine stays
+  `api.cam.engine`). Fact sheets are cached per model, so the first draft after the
+  switch re-reads every document.
+
 - **News monitor: searched overnight, ready for the 7 AM digest.** The hourly batches now
   start only between 00:00 and 06:00 on the desk's clock (`PULSE_DIGEST_TZ`, IST), so
   the day's Google allowance is left to the desk and the system is quiet in working

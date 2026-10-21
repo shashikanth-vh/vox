@@ -69,6 +69,49 @@ def test_xlsx_sheet_becomes_table_chunk(tmp_path):
     assert "Covenant: DSCR, Threshold: 1.20x, Frequency: Quarterly" in tables[0].text
 
 
+def _dimension_a1(xlsx: bytes) -> bytes:
+    """The same workbook as a report generator writes it: every sheet's <dimension>
+    says A1 whatever the sheet holds (Pulze's bank-statement analyses, ScoreMe's
+    legal and ITR reports)."""
+    import io
+    import re
+    import zipfile
+
+    src, out = zipfile.ZipFile(io.BytesIO(xlsx)), io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        for item in src.infolist():
+            data = src.read(item.filename)
+            if item.filename.startswith("xl/worksheets/sheet"):
+                data, n = re.subn(rb'<dimension ref="[^"]*"\s*/>', b'<dimension ref="A1"/>', data)
+                assert n == 1, "the fixture must rewrite the tag"
+            z.writestr(item, data)
+    return out.getvalue()
+
+
+def test_a_sheet_whose_dimension_says_a1_is_read_in_full(tmp_path):
+    # openpyxl's read-only mode trusted the tag: three real BSA reports came back
+    # "[empty sheet]" and the CAM called them empty templates.
+    from app.knowledge.extractors.xlsx_extractor import extract_xlsx
+
+    path = _write(tmp_path, "bsa.xlsx", _dimension_a1(covenants_xlsx()))
+    [page] = extract_xlsx(str(path))
+    assert "[empty sheet]" not in page.markdown
+    assert page.tables[0].rows[1] == ["DSCR", "1.20x", "Quarterly"]
+
+
+def test_a_cached_workbook_is_read_again_when_the_sheet_reader_changes(tmp_path):
+    from app.extract import PIPELINE_VERSION, SHEET_VERSION, Extractor
+
+    class _S:
+        data_dir = str(tmp_path)
+
+    ex = Extractor(_S())  # type: ignore[arg-type]
+    first = ex.extract("EVAM", "bsa.xlsx", _dimension_a1(covenants_xlsx()), use_sarvam=False)
+    assert "DSCR" in first["markdown"]
+    names = [p.name for p in (tmp_path / ".extract-cache" / "EVAM").iterdir()]
+    assert names and all(n.endswith(f"-v{PIPELINE_VERSION}-x{SHEET_VERSION}.json") for n in names)
+
+
 def _cma_xls() -> bytes:
     """A small real Excel 97–2003 workbook, like the CMA files desks upload."""
     import io

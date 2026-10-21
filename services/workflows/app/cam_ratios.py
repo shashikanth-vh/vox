@@ -352,6 +352,48 @@ def plausibility(fig: Figures, ratios: list[Ratio]) -> list[str]:
     g, _span = cagr(fig)
     if g is not None and g > 150:
         out.append(f"Revenue CAGR = {_fmt(g, '%')}")
+    return out + consistency(fig)
+
+
+def _close(a: float, b: float) -> bool:
+    return abs(a - b) <= 0.5
+
+
+def consistency(fig: Figures) -> list[str]:
+    """Identities a correct extraction cannot break. Each is a mis-read line, not a
+    business fact: Pulze's first draft locked current liabilities equal to total outside
+    liabilities in every year (with term debt on the books) and one year's term debt
+    equal to its working-capital debt — and every leverage ratio inherited both."""
+    out = []
+    for p in fig.periods:
+        tol, cl = p["total_outside_liabilities"], p["current_liabilities"]
+        td, wc = p["term_debt"], p["wc_debt"]
+        if tol is not None and cl is not None:
+            if cl > tol + 0.5:
+                out.append(f"Consistency {p.label}: current liabilities {cl:g} exceed total "
+                           f"outside liabilities {tol:g}")
+            elif _close(tol, cl) and ((td or 0) > 0 or (p["promoter_unsecured_loans"] or 0) > 0):
+                out.append(f"Consistency {p.label}: total outside liabilities equal current "
+                           f"liabilities ({tol:g}) although term debt or unsecured loans are "
+                           "on the books — TOL is probably the current-liabilities total")
+        if td and wc and _close(td, wc):
+            out.append(f"Consistency {p.label}: term debt and working-capital debt are the "
+                       f"same figure ({td:g}) — one was probably copied into the other")
+        if wc is not None and cl is not None and wc > cl + 0.5:
+            out.append(f"Consistency {p.label}: working-capital debt {wc:g} exceeds current "
+                       f"liabilities {cl:g}, which include it")
+        it, itd = p["interest_total"], p["interest_term_debt"]
+        if it is not None and itd is not None and itd > it + 0.5:
+            out.append(f"Consistency {p.label}: interest on term debt {itd:g} exceeds total "
+                       f"interest {it:g}")
+        pat, pbdit = p["pat"], p["pbdit"]
+        if pat is not None and pbdit is not None and pat > pbdit + 0.5:
+            out.append(f"Consistency {p.label}: PAT {pat:g} exceeds PBDIT {pbdit:g}")
+        ca = p["current_assets"]
+        parts = [x for x in (p["trade_receivables"], p["inventory"]) if x is not None]
+        if ca is not None and parts and sum(parts) > ca + 0.5:
+            out.append(f"Consistency {p.label}: receivables + inventory {sum(parts):g} exceed "
+                       f"current assets {ca:g}")
     return out
 
 
