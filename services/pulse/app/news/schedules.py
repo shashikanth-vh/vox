@@ -376,19 +376,30 @@ def merge_shared(groups: list[tuple[str, list[dict[str, Any]]]],
     return out
 
 
-def _subject(label: str, groups: list[tuple[str, list[dict[str, Any]]]], total: int) -> str:
-    """Lead with who needs attention, not with a count: the reader decides from the
-    subject line whether to open it."""
+def _counts_line(groups: list[tuple[str, list[dict[str, Any]]]], total: int, new: int,
+                 window: int) -> str:
+    """"2 new · 5 in the last 7 days" — or "nothing in the last 7 days"."""
     if not groups:
-        return f"{label} — nothing new to report"
+        return f"nothing in the last {window} days"
+    return (f"{new} new · {total} item{'s' if total != 1 else ''} "
+            f"in the last {window} days")
+
+
+def _subject(label: str, groups: list[tuple[str, list[dict[str, Any]]]], total: int,
+             new: int = 0, window: int = 7) -> str:
+    """Lead with who needs attention, not with a count: the reader decides from the
+    subject line whether to open it. Firms with something NEW are named first."""
+    if not groups:
+        return f"{label} — nothing in the last {window} days"
     rank = {"UGLY": 0, "BAD": 1}
-    top = sorted(groups, key=lambda g: (min((rank.get(a.get("severity", ""), 9)
+    top = sorted(groups, key=lambda g: (not any(a.get("new") for a in g[1]),
+                                        min((rank.get(a.get("severity", ""), 9)
                                              for a in g[1]), default=9), -len(g[1])))
     names = [n for n, _ in top[:2]]
     more = len(groups) - len(names)
     return (f"{label} — {', '.join(names)}"
             + (f" and {more} more firm{'s' if more != 1 else ''}" if more else "")
-            + f" ({total} item{'s' if total != 1 else ''})")
+            + f" ({_counts_line(groups, total, new, window)})")
 
 
 async def run_schedule(schedule: dict[str, Any], *, search: Callable, send: Callable,
@@ -510,8 +521,15 @@ async def _send_digest(schedule: dict[str, Any],
                        before: set[str], on_sent: Callable[[list[str]], None] | None,
                        send_at: float | None, dfrom: str, dto: str, adverse_only: bool,
                        t0: float, retried: int) -> tuple[bool, str, int, int]:
-    """Filter what was found (adverse only, only new), compose and send — the same for
-    a digest that searched and one that read the monitor's findings."""
+    """Filter what was found (adverse only), mark what is new, compose and send — the
+    same for a digest that searched and one that read the monitor's findings.
+
+    The email covers the WHOLE window every time. It used to drop every story sent
+    before ("only new"), so a "7-day" digest on a quiet morning said "0 items" while
+    four adverse stories sat inside the week (production, 20–23 Oct). Now a story sent
+    before stays in, marked as such, and what is new since the last email is marked NEW
+    and counted in the subject. Old stories resurfacing (the weekly Satyendar Jain
+    arrest) are still kept out by the window, which reads each story's own date."""
     if send_at is not None and send_at > time.time():
         # Searched early so the email lands at the scheduled minute, not after the run.
         await asyncio.sleep(send_at - time.time())
@@ -522,29 +540,34 @@ async def _send_digest(schedule: dict[str, Any],
     for name, arts in pairs:
         if adverse_only:
             arts = [a for a in arts if a.get("severity") in ("UGLY", "BAD")]
-        fresh_arts = [a for a in arts if story_key(a) not in before]
-        repeats += len(arts) - len(fresh_arts)
-        if fresh_arts:
-            groups.append((name, fresh_arts))
+        marked = [{**a, "new": story_key(a) not in before} for a in arts]
+        repeats += sum(1 for a in marked if not a["new"])
+        if marked:
+            groups.append((name, marked))
     groups = merge_shared(groups)
     total = sum(len(a) for _, a in groups)
+    new_total = sum(1 for _, arts in groups for a in arts if a.get("new"))
 
     # One page for the whole run: the masthead once, then a card per firm — and the
     # coverage, even when nothing was found: "nothing new" with Google down for most
     # firms is not the same email as "nothing new".
     body = digest(groups, dfrom, dto, adverse_only=adverse_only, coverage=coverage)
     label = "PRISM " + ("adverse news" if adverse_only else "news") + " digest"
-    subject = schedule.get("subject") or _subject(label, groups, total)
+    window = int(schedule.get("window_days", 7) or 7)
+    # A desk's own subject line keeps its words and gains the counts, so "0 new" is
+    # never read as "nothing this week".
+    subject = (f"{schedule['subject']} — {_counts_line(groups, total, new_total, window)}"
+               if schedule.get("subject") else _subject(label, groups, total, new_total, window))
 
     ok, msg = await asyncio.to_thread(
         send, schedule.get("recipients", []), subject,
-        body or "<p>No new matching news in this window.</p>")
-    if ok and on_sent is not None and groups:
-        on_sent([story_key(a) for _, arts in groups for a in arts])
+        body or "<p>No matching news in this window.</p>")
+    if ok and on_sent is not None and new_total:
+        on_sent([story_key(a) for _, arts in groups for a in arts if a.get("new")])
     log.info("pulse_schedule_done", extra={"id": schedule.get("id"),
                                            "seconds": round(time.time() - t0, 1),
                                            "firms": len(groups), "items": total,
-                                           "repeats_skipped": repeats,
+                                           "new": new_total, "sent_before": repeats,
                                            "retried_firms": retried,
                                            "sources_down": down_count, "result": msg})
     if not down_count:

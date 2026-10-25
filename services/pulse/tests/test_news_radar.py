@@ -784,22 +784,45 @@ async def test_a_record_marked_not_watched_leaves_the_digest_even_from_the_snaps
 
 
 @pytest.mark.asyncio
-async def test_a_story_already_sent_is_not_sent_again_and_what_went_out_is_remembered():
-    """The same Satyendar Jain arrest arrived every week: a schedule now remembers what
-    it sent and only sends what is new — and only remembers a send that succeeded."""
-    _, sent, search, send, digest = _digest_runner_parts()
+async def test_the_whole_window_is_sent_with_what_is_new_marked_and_remembered():
+    """A "7-day" digest shows the week every morning. It used to drop every story sent
+    before, so a quiet morning said "0 items" with four adverse stories inside the week
+    (production, 20–23 Oct). A story sent before stays in, marked; only the new ones are
+    remembered — and only after a send that succeeded."""
+    from app.news.mailer import digest_page as digest
+    _, sent, search, send, _fake = _digest_runner_parts()
     remembered = []
     first = {"id": "S1", "q": "Acme Solar, Beta Wind", "recipients": ["a@b.com"]}
-    ok, _, firms, _ = await sched.run_schedule(
+    ok, _, firms, total = await sched.run_schedule(
         first, search=search, send=send, digest=digest,
         already_sent={sched.story_key({"title": "Acme Solar wins order"})},
         on_sent=remembered.extend)
-    assert ok and firms == 1 and "Beta Wind" in sent["body"] and "Acme" not in sent["body"]
+    assert ok and firms == 2 and total == 2
+    assert "Beta Wind" in sent["body"] and "Acme" in sent["body"]
+    assert "sent before" in sent["body"] and ">NEW<" in sent["body"]
+    assert "1 new · 2 items in the last 7 days" in sent["subject"]
+    # The firm with something new leads the subject.
+    assert sent["subject"].index("Beta Wind") < sent["subject"].index("Acme Solar")
     assert remembered == [sched.story_key({"title": "Beta Wind wins order"})]
     remembered.clear()
     await sched.run_schedule(first, search=search, send=lambda *a: (False, "smtp down"),
                              digest=digest, on_sent=remembered.extend)
     assert remembered == [], "a failed send is not remembered as sent"
+
+
+@pytest.mark.asyncio
+async def test_a_quiet_morning_still_shows_the_week_and_a_desk_subject_gets_the_counts():
+    from app.news.mailer import digest_page as digest
+    _, sent, search, send, _fake = _digest_runner_parts()
+    keys = {sched.story_key({"title": "Acme Solar wins order"}),
+            sched.story_key({"title": "Beta Wind wins order"})}
+    sched_ = {"id": "S1", "q": "Acme Solar, Beta Wind", "recipients": ["a@b.com"],
+              "subject": "ATLAS news digest"}
+    ok, _, firms, total = await sched.run_schedule(
+        sched_, search=search, send=send, digest=digest, already_sent=keys)
+    assert ok and firms == 2 and total == 2
+    assert sent["subject"] == "ATLAS news digest — 0 new · 2 items in the last 7 days"
+    assert ">NEW<" not in sent["body"] and sent["body"].count("sent before") == 2
 
 
 def test_two_records_reporting_the_same_story_become_one_card():

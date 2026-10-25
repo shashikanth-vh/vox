@@ -174,7 +174,9 @@ def firm_card(term: str, articles: list[dict[str, Any]],
     marked as older rather than passed off as this week's news. An article found
     through one of the firm's key people names that person above the headline.
     ``anchor`` makes the card a target for the contents line, with a way back up."""
+    # Most serious first; within a severity, what is NEW since the last email first.
     arts = sorted(articles, key=lambda a: (_SEV_RANK.get(a.get("severity", ""), 9),
+                                           a.get("new") is False,
                                            -int(re.sub(r"\D", "", a.get("when") or "")[:8] or 0)))
     counts = _counts(arts)
     worst = min(counts, key=lambda s: _SEV_RANK.get(s, 9)) if counts else "GOOD"
@@ -202,6 +204,8 @@ def firm_card(term: str, articles: list[dict[str, Any]],
                     f'&ldquo;{_html.escape(found)}&rdquo;</span>')
         if is_older(a):
             out += ' &middot; <span style="color:#8A6D1F;font-weight:600">older story</span>'
+        if a.get("new") is False:
+            out += f' &middot; <span style="color:{_MUTED}">sent before</span>'
         return out
 
     groups = stories(arts, term)
@@ -227,6 +231,10 @@ def firm_card(term: str, articles: list[dict[str, Any]],
             + (f'<div style="color:#1F6FA8;font-size:11px;font-weight:700;'
                f'letter-spacing:.3px;margin-bottom:2px">{_html.escape(a["about"])}</div>'
                if a.get("about") else '')
+            + ('<span style="display:inline-block;background:#C0392B;color:#fff;'
+               'font-size:10px;font-weight:700;letter-spacing:.6px;padding:1px 6px;'
+               'border-radius:3px;margin-right:6px;vertical-align:2px">NEW</span>'
+               if a.get("new") else '')
             + f'<a href="{_html.escape(a.get("url", ""))}" style="color:{_NAVY};'
             'text-decoration:none;font-size:14px;font-weight:600;line-height:1.35'
             + (';opacity:.75' if is_older(a) else '') + f'">{_html.escape(a.get("title", ""))}</a>'
@@ -308,7 +316,11 @@ def digest_page(groups: list[tuple[str, list[dict[str, Any]]]], dfrom: str = "",
     title = "Adverse news digest" if adverse_only else "News digest"
     firms = len(groups)
     n_stories = sum(len(stories(a, t)) for t, a in groups)
-    stats = (f'{firms} firm{"" if firms == 1 else "s"} &middot; {n_stories} '
+    n_new = sum(1 for a in articles if a.get("new"))
+    marked = any("new" in a for a in articles)
+    stats = ((f'<b style="color:#C0392B">{n_new} new</b> since the last email &middot; '
+              if marked else '')
+             + f'{firms} firm{"" if firms == 1 else "s"} &middot; {n_stories} '
              f'stor{"y" if n_stories == 1 else "ies"}'
              + (f' from {len(articles)} reports' if len(articles) != n_stories else '')
              + (f' &middot; {_tally(totals)}' if totals else ''))

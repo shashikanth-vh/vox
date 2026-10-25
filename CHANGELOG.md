@@ -6,6 +6,17 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **The news digest shows the whole window, not only what is new.** A digest titled
+  "last 7 days" sent only stories it had not sent before, so a quiet morning read "0"
+  while the week held adverse news (production, 20–23 Oct: four adverse stories in the
+  window, three emails saying 0). Every email now carries every matching story in the
+  window. Stories new since the last email lead their firm with a NEW badge, and those
+  already sent are marked "sent before". The subject and header give both counts, e.g.
+  "1 new · 4 items in the last 7 days", and a custom subject has the counts appended.
+  Only new stories are remembered as sent, and only once the send succeeds. The date
+  window still keeps out old stories a search resurfaces. *Operator:* rebuild `pulse`.
+  There is no setting or data change.
+
 - **IRG report in minutes, with or without a CAM.** The first IRG report took 13 minutes,
   9 of them re-building the financial dataset. Now: the locked dataset is cached like
   the fact sheets (an IRG after a CAM, or a regrade, reuses it); without a CAM the IRG
