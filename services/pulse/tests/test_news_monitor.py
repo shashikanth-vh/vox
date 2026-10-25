@@ -590,7 +590,9 @@ async def test_the_history_pass_searches_a_year_back(tmp_path):
     await m.run("EVAM", full=True)
     await m.run("EVAM", full=True, history=True)
     first, hist = search.calls[0]["dfrom"], search.calls[-1]["dfrom"]
-    year_ago = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+    # The monitor's day is the DESK's day (Asia/Kolkata), not the container's: between
+    # 18:30 and 24:00 UTC the two dates differ and a naive datetime.now() here failed.
+    year_ago = (datetime.now(sched.desk_tz()) - timedelta(days=365)).strftime("%Y-%m-%d")
     assert hist == year_ago and first > year_ago
     assert m.store.tenant("EVAM")["run"]["kind"] == "history"
 
