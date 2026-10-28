@@ -88,6 +88,8 @@ _KIND_OF_NAME = (("bank statement analysis", r"\bbsa\b|statement analysis"),
                  ("sanction letter", r"sanction|term loan|vehicle loan|\bloan\b"),
                  ("debt profile", r"debt profile|loan schedule"),
                  ("term sheet", r"term ?sheet"),
+                 ("management profile", r"promoter|management|founder|\bteam\b|\bcvs?\b"
+                                        r"|resume|bio[- ]?data|\bbios?\b|director'?s?\s+profile"),
                  ("company profile", r"company profile|pitch|deck|brochure"),
                  ("net worth statement", r"net ?worth"),
                  ("constitution / registration", r"deed|registration certificate|incorporation"
@@ -135,10 +137,12 @@ def mentions(headline: str, name: str, *, person: bool = False) -> bool:
     a news search for "Fractal Energy" also returns "a fractal universe"."""
     h = (headline or "").lower()
     if person:
+        # Every name part, as a whole word: "Asha R Menon" needs Asha AND Menon — a
+        # surname alone names thousands, and the CAM took their news.
         parts = [p for p in re.split(r"[\s.]+", name.lower()) if len(p) > 2]
-        return bool(parts) and parts[-1] in h
+        return bool(parts) and all(re.search(rf"\b{re.escape(p)}\b", h) for p in parts)
     core = name_core(name)
-    return bool(core) and core in h
+    return bool(core) and bool(re.search(rf"\b{re.escape(core)}\b", h))
 
 
 # The order files take the per-grade budget in: hard actuals first, projections last —

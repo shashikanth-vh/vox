@@ -51,9 +51,10 @@ from evam_backend_core.logging import get_logger
 
 from app.news import official
 from app.news.evidence import read_evidence
-from app.news.names import too_common, watch_names
-from app.news.schedules import desk_tz, story_key
+from app.news.names import GENERIC, short_name, too_common, watch_names
+from app.news.schedules import desk_tz, story_key, trading_name
 from app.news.search import in_window, mentions
+from app.news.triage import triage
 
 log = get_logger("pulse.monitor")
 
@@ -339,6 +340,136 @@ def findings_digest(rows: list[dict[str, Any]], firms: list[dict[str, Any]],
 
 FirmsFn = Callable[[str], Awaitable[list[dict[str, Any]]]]
 FileFn = Callable[[str, str, dict[str, Any]], Awaitable[None]]   # tenant, key, row
+RowsFn = Callable[[str], Awaitable[list[dict[str, Any]]]]        # tenant → filed rows
+UpdateFn = Callable[[str, dict[str, Any], dict[str, Any]], Awaitable[None]]  # tenant, row, data
+
+
+# ------------------------------------------------------------- who a story is about
+# What a story about a climate-finance borrower prints beside its name. A story found
+# only under the automatic short name ("Acme" for Acme Energy) must carry one of these,
+# the words the short name dropped, or the firm's city — a semiconductor maker sharing
+# a short name and a village sharing another reached the desk as UGLY without
+# (cipher-test, Oct 2026).
+_SECTOR = re.compile(
+    r"\b(?:solar|power|energy|renewables?|mw|gw|kwh|mwh|battery|batteries|ev|evs|electric|"
+    r"wind|hydrogen|biogas|bio-?cng|grid|discom|rooftop|epc|charging|storage|bess|lithium|"
+    r"climate|carbon|recycl\w*|waste|water|cleantech|green|pv|photovoltaic|modules?|"
+    r"inverters?|wafers?|ribbons?|busbars?|e-?mobility|e-?scooters?|electric scooters?|"
+    r"two-wheelers?|three-wheelers?|[23]w|e-?rickshaws?|lng|cng|ethanol|biofuels?|"
+    r"electrolys[ei]rs?|switchgear|transformers?)\b", re.I)
+# Deliberately not everyday words — "barbed wire", "fans cheer", "LED screen", "motors"
+# revived a celebrity wedding for a solar firm sharing a first name (cipher-test, Oct 2026).
+# A corporate suffix printed after a name ("… from Acme Power Private Limited") ties
+# a story to a registered company even when its trading name is an everyday phrase.
+_SUFFIXED = re.compile(r"\b(?:private\s+limited|pvt\.?\s*ltd\.?|limited|ltd\.?|llp)\b", re.I)
+
+
+def firm_names(firm: dict[str, Any]) -> tuple[list[str], str | None, list[str]]:
+    """(the names to search, in order; the automatic short name when it is one of them;
+    the analyst's news names). The trading name without its "Limited" / "Pvt Ltd", the
+    legal name when it differs, the analyst's names, the short name — each dropped if it
+    is an everyday phrase, unless the analyst chose it."""
+    trading = trading_name(str(firm.get("name") or ""))
+    legal = trading_name(str(firm.get("legal_name") or ""))
+    aliases = [str(a).strip() for a in (firm.get("aliases") or []) if str(a or "").strip()]
+    names = [n for n in watch_names(trading, aliases,
+                                    legal="" if legal.casefold() == trading.casefold() else legal)
+             if n in aliases or not too_common(n)]
+    short = short_name(trading)
+    return names, (short if short and short in names and short not in aliases else None), aliases
+
+
+def _named(article: dict[str, Any], name: str) -> bool:
+    """The name is printed AS A NAME: whole words, the first one capitalised, the text
+    in capitals, or exactly as the firm writes itself (a brand like "e-Acme" is lower-case by
+    design) — "an organic-framework probe" and "a site consultant" print the
+    words, not a firm."""
+    text = f"{article.get('title', '')} {article.get('snippet', '')}"
+    words = re.findall(r"[A-Za-z0-9&']+", name)
+    if not words:
+        return False
+    rx = re.compile(r"(?<![A-Za-z0-9])" + r"[^A-Za-z0-9]+".join(map(re.escape, words))
+                    + r"(?![A-Za-z0-9])", re.I)
+    for m in rx.finditer(text):
+        first = m.group(0)[0]
+        # A name the firm itself writes in lower case ("e-…") is printed in any case
+        # ("e-…", "E-…", "e-…" in capitals): its case says nothing.
+        if (first.isupper() or first.isdigit() or m.group(0).isupper()
+                or name.strip()[:1].islower()):
+            return True
+    return False
+
+
+def _registered(article: dict[str, Any], firm: dict[str, Any]) -> bool:
+    """The story prints the firm's registered name WITH its corporate suffix."""
+    for full in (str(firm.get("legal_name") or ""), str(firm.get("name") or "")):
+        if _SUFFIXED.search(full) and _named(article, full):
+            return True
+        core = trading_name(full)
+        if core and core != full.strip():
+            words = re.findall(r"[A-Za-z0-9&']+", core)
+            rx = re.compile(r"(?<![A-Za-z0-9])" + r"[^A-Za-z0-9]+".join(map(re.escape, words))
+                            + r"[\s,]+(?:private\s+limited|pvt\.?\s*ltd|limited|ltd|llp)\b",
+                            re.I)
+            if words and rx.search(f"{article.get('title', '')} {article.get('snippet', '')}"):
+                return True
+    return False
+
+
+def about_firm(article: dict[str, Any], firm: dict[str, Any], names: list[str],
+               short: str | None) -> bool:
+    """Is this story about this firm, by today's rules?"""
+    if _registered(article, firm):
+        return True
+    hit = next((n for n in names if _named(article, n)), None)
+    if hit is None:
+        return False
+    if short and hit.casefold() == short.casefold():
+        text = f"{article.get('title', '')} {article.get('snippet', '')}"
+        dropped = [w for w in re.findall(r"[A-Za-z]+", trading_name(str(firm.get("name") or "")))
+                   if w.casefold() != short.casefold() and w.lower() in GENERIC]
+        anchors = [*dropped, str(firm.get("city") or "")]
+        return bool(_SECTOR.search(text)) or any(mentions(article, w) for w in anchors if w)
+    return True
+
+
+def rejudge(row: dict[str, Any], firm: dict[str, Any]) -> dict[str, str] | None:
+    """What today's rules make of a story the monitor filed earlier: {"dismiss": why}
+    when it is no longer about the firm, {"regrade": severity} when its colour changed,
+    None when it stands. Filed rows are never re-judged otherwise — the 16 Oct history
+    pass on cipher-test kept thirteen UGLY namesakes on screen for ten days after the
+    rules that would have refused them shipped. Official records and stories about a
+    person keep their own matching and are left as filed."""
+    p = row.get("payload") or {}
+    if (not p.get("monitor") or row.get("intel_type") != "News" or p.get("about")
+            or p.get("category") == "context-review"):
+        return None
+    if row.get("is_dismissed"):
+        # Only what the re-check itself dismissed is judged again — and restored when
+        # today's rules say it is about the firm. A person's dismissal is never touched.
+        if p.get("dismissed_by") != "recheck" and not str(p.get("recheck") or "").startswith(
+                ("not about", "“")):
+            return None
+        again = rejudge({**row, "is_dismissed": False}, firm)
+        if again is None or "regrade" in again:
+            return {"restore": (again or {}).get("regrade", "")}
+        return None
+    article = article_of(row)
+    names, short, _aliases = firm_names(firm)
+    if not names and _registered(article, firm):
+        names = [str(firm.get("name") or "")]
+    elif not names:
+        # "Green Energy", "Sun Power": the name is an everyday phrase, so no story
+        # can be told to be about this firm until the desk sets its news names.
+        return {"dismiss": f"“{firm.get('name')}” is an everyday phrase, so this story "
+                           "cannot be tied to the firm — set its news names to watch it"}
+    if not about_firm(article, firm, names, short):
+        return {"dismiss": f"not about {firm.get('name')} by today's name rules — a "
+                           "namesake or an everyday phrase"}
+    sev = triage(str(article.get("title") or "")).severity
+    if sev != str(p.get("severity") or ""):
+        return {"regrade": sev}
+    return None
 
 
 class Monitor:
@@ -347,8 +478,11 @@ class Monitor:
     ``file(tenant, row)`` writes one intel row to the Register."""
 
     def __init__(self, store: MonitorStore, search: Any, firms: FirmsFn, file: FileFn,
-                 config: MonitorConfig, tenants: list[str]) -> None:
+                 config: MonitorConfig, tenants: list[str], *, rows: RowsFn | None = None,
+                 update: UpdateFn | None = None) -> None:
         self.store, self.search, self.firms, self.file = store, search, firms, file
+        # The two doors the re-check needs: the rows filed, and a change to one.
+        self.rows, self.update = rows, update
         self.config = config
         self.tenants = [t.upper() for t in tenants if t.strip()]
         self.running: dict[str, asyncio.Task] = {}
@@ -429,6 +563,7 @@ class Monitor:
         }
         return {
             "enabled": self.config.enabled, "people": people,
+            "recheck": t.get("recheck"),
             "firms": len(known), "searched_fresh": searched_fresh,
             "searched_24h": searched_day, "never_searched": never,
             "refresh_hours": self.config.refresh_hours,
@@ -525,6 +660,13 @@ class Monitor:
         for f in firms:
             self.store.firm(tenant, str(f["id"]))["name"] = f.get("name", "")
         filed = 0
+        # Once a day, before searching: what was filed is judged again by today's rules.
+        if time.time() - float((t.get("recheck") or {}).get("at") or 0) > 86400:
+            try:
+                await self.recheck(tenant, firms)
+            except Exception as exc:  # noqa: BLE001 - a failed re-check never stops a pass
+                log.warning("pulse_monitor_recheck_failed", extra={"tenant": tenant,
+                                                                   "error": str(exc)})
         filed += await self._official(tenant, firms, history=history)
         # Which firms: all of them (full), or those whose last complete search is older
         # than the refresh interval, oldest first (never-searched first of all).
@@ -577,6 +719,64 @@ class Monitor:
                                               "waiting": stopped_for_budget})
         return t["run"]
 
+    async def recheck(self, tenant: str,
+                      firms: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        """Judge every story filed for a watched firm again by today's rules: a namesake
+        is dismissed and a changed colour re-graded, each with the reason in its payload
+        (``recheck``). Nothing is deleted; a desk can restore a dismissed row."""
+        tenant = tenant.upper()
+        t = self.store.tenant(tenant)
+        if self.rows is None or self.update is None:
+            return {"note": "re-check not wired"}
+        by_id = {str(f["id"]): f for f in (firms if firms is not None
+                                           else await self.watched(tenant))}
+        checked = dismissed = regraded = restored = failed = 0
+        today = datetime.now(desk_tz()).strftime("%Y-%m-%d")
+        for row in await self.rows(tenant):
+            firm = by_id.get(str(row.get("entity_id")))
+            if firm is None:
+                continue
+            checked += 1
+            verdict = rejudge(row, firm)
+            if not verdict:
+                continue
+            payload = {**(row.get("payload") or {}), "rechecked": today}
+            if "dismiss" in verdict:
+                data: dict[str, Any] = {"is_dismissed": True, "payload": {
+                    **payload, "recheck": verdict["dismiss"], "dismissed_by": "recheck"}}
+            elif "restore" in verdict:
+                sev = verdict["restore"] or str(payload.get("severity") or "")
+                payload.pop("dismissed_by", None)
+                data = {"is_dismissed": False, "payload": {
+                    **payload, "severity": sev or payload.get("severity"),
+                    "recheck": "restored: about the firm by today's rules"}}
+                if verdict["restore"]:
+                    data["signal"] = SIGNAL_OF.get(sev, "AMBER")
+            else:
+                sev = verdict["regrade"]
+                data = {"signal": SIGNAL_OF.get(sev, "AMBER"),
+                        "payload": {**payload, "severity": sev, "recheck":
+                                    f"re-graded {payload.get('severity')} → {sev} by today's "
+                                    "rules"}}
+            try:
+                await self.update(tenant, row, data)
+            except Exception as exc:  # noqa: BLE001 - the next day's re-check retries it
+                failed += 1
+                log.warning("pulse_monitor_recheck_row_failed",
+                            extra={"tenant": tenant, "row": row.get("id"), "error": str(exc)})
+                continue
+            if "dismiss" in verdict:
+                dismissed += 1
+            elif "restore" in verdict:
+                restored += 1
+            else:
+                regraded += 1
+        t["recheck"] = {"at": time.time(), "checked": checked, "dismissed": dismissed,
+                        "regraded": regraded, "restored": restored, "failed": failed}
+        self.store.save()
+        log.info("pulse_monitor_recheck", extra={"tenant": tenant, **t["recheck"]})
+        return t["recheck"]
+
     async def _search_firm(self, tenant: str, firm: dict[str, Any],
                            lookback_days: int | None = None) -> int:
         """Search one firm (its names, with the adverse words; its people in one more
@@ -598,7 +798,7 @@ class Monitor:
         down: dict[str, str] = {}
         found: list[dict[str, Any]] = []
         name = str(firm.get("name") or "")
-        names = [n for n in watch_names(name, firm.get("aliases")) if not too_common(n)]
+        names, short, _aliases = firm_names(firm)
         if not names:
             # Not searched rather than searched badly: the gap is named on the screen and
             # in the digest until someone sets the firm's news names.
@@ -609,7 +809,9 @@ class Monitor:
                 arts, sources = await self.search.search_detail(
                     name, dfrom, dto, 80, strict=True, names=names, bulk=True,
                     adverse=self.config.adverse_query)
-                found.extend(arts)
+                # Kept only when it names the firm AS a name, and — found under the short
+                # name alone — carries the firm's sector or city.
+                found.extend(a for a in arts if about_firm(a, firm, names, short))
                 down.update({s["name"]: s.get("error", "") for s in sources
                              if not s.get("ok") and s.get("name") != "GDELT"})
             except Exception as exc:  # noqa: BLE001 - one firm never ends a pass

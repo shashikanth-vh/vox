@@ -190,7 +190,8 @@ def create_app() -> FastAPI:
         app.state.monitor_store = mon.MonitorStore(settings.monitor_file)
         app.state.monitor = mon.Monitor(
             app.state.monitor_store, app.state.search, _monitor_firms, _file_finding,
-            settings.monitor_config(), settings.monitor_tenant_list())
+            settings.monitor_config(), settings.monitor_tenant_list(),
+            rows=_monitor_rows, update=_update_finding)
         app.state.monitor_task = None
         if settings.monitor_enabled:
             app.state.monitor_task = asyncio.create_task(
@@ -396,6 +397,26 @@ def create_app() -> FastAPI:
         for the firm, so a retry after a timeout is a replay, not a second row."""
         await _tenant_client(app, tenant).create("external-intelligence", row,
                                                  idempotency_key=key)
+
+    async def _monitor_rows(tenant: str) -> list[dict[str, Any]]:
+        """Every news story the monitor filed that the desk has not dismissed, and those
+        the re-check dismissed — what the daily re-check judges again."""
+        client = _tenant_client(app, tenant)
+        rows: list[dict[str, Any]] = []
+        async for row in client.iterate("external-intelligence", page_size=200,
+                                        intel_type="News"):
+            p = row.get("payload") or {}
+            # Live stories, and those the re-check itself dismissed (it may restore them).
+            if p.get("monitor") and (not row.get("is_dismissed") or p.get("recheck")):
+                rows.append(row)
+        return rows
+
+    async def _update_finding(tenant: str, row: dict[str, Any], data: dict[str, Any]) -> None:
+        """One re-check verdict onto its row, at the version read — a row the desk has
+        changed since is left to the next day's re-check."""
+        await _tenant_client(app, tenant).update(
+            "external-intelligence", str(row["id"]), data,
+            expected_version=row.get("row_version"))
 
     async def _stored_findings(tenant: str, dfrom: str, dto: str,
                                ) -> tuple[list[tuple[str, list[dict[str, Any]]]],
@@ -840,6 +861,18 @@ def create_app() -> FastAPI:
         writable, why = request.app.state.monitor_store.probe()
         return {**request.app.state.monitor.status(tenant),
                 "store_ok": writable, "store_error": why}
+
+    @app.post("/v1/news/monitor/recheck", tags=["News Radar"],
+              summary="Judge every filed story again by today's rules (namesakes dismissed)")
+    async def monitor_recheck(request: Request, tenant: str = Depends(tenant_of),
+                              x_api_key: str | None = Header(default=None,
+                                                             alias="X-API-Key")) -> Any:
+        """Runs once a day on its own, before the night's first batch; this asks for it
+        now. A story no longer about its firm is dismissed and a changed colour
+        re-graded, each with the reason in its payload. Answers the counts."""
+        if (denied := _require_api_key(settings, x_api_key)) is not None:
+            return denied
+        return {"ok": True, **await request.app.state.monitor.recheck(tenant)}
 
     @app.post("/v1/news/monitor/scan", tags=["News Radar"],
               summary="Scan all firms now (background), or one firm (waits up to 50 s)")

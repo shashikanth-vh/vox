@@ -842,6 +842,15 @@ services:
       # Fact sheets are kept on the camcache volume, so a deploy or a re-draft on the
       # same file does not read every document again.
       WORKFLOWS_CAM_DIGEST_REASONING_EFFORT: "${WORKFLOWS_CAM_DIGEST_REASONING_EFFORT-low}"
+      WORKFLOWS_CAM_REPAIR_REASONING_EFFORT: "${WORKFLOWS_CAM_REPAIR_REASONING_EFFORT-low}"
+      # v1 | v2 — v2: PRISM reads known layouts into a fact ledger and renders their tables
+      WORKFLOWS_CAM_HARNESS: "${WORKFLOWS_CAM_HARNESS:-v1}"
+      # v2 reviewer: "" = the CAM engine reviews; "provider:model" = a stronger engine for review only
+      WORKFLOWS_CAM_CRITIC_ENGINE: "${WORKFLOWS_CAM_CRITIC_ENGINE:-}"
+      # the credit rubric v2 sets signals from: "" = packaged (A3 bands); a path = the team's copy
+      WORKFLOWS_CAM_RUBRIC_PATH: "${WORKFLOWS_CAM_RUBRIC_PATH:-}"
+      # v2: fact sheets per sub-section call, most relevant first (0 = the part's whole context)
+      WORKFLOWS_CAM_SUB_SHEET_CHARS: "${WORKFLOWS_CAM_SUB_SHEET_CHARS:-60000}"
       WORKFLOWS_CAM_PIPELINE_CONCURRENCY: "${WORKFLOWS_CAM_PIPELINE_CONCURRENCY:-8}"
       WORKFLOWS_CAM_DIGEST_CACHE_DIR: /data/cam-cache
       # CAM documents are read by DocRAG (OpenDataLoader + Sarvam OCR for scans). If DocRAG

@@ -101,12 +101,18 @@ def _level_to_int(level) -> int:
     return 1
 
 
+def _children(node: dict) -> list[dict]:
+    """A node's children in reading order. A list keeps its entries under "list items",
+    not "kids" -- read only "kids" and every numbered list comes back empty."""
+    return [*node.get("kids", []), *node.get("list items", [])]
+
+
 def _node_text(node: dict) -> str:
     """Concatenate a node's own content plus all descendants', in order."""
     parts: list[str] = []
     if node.get("content"):
         parts.append(str(node["content"]))
-    for kid in node.get("kids", []):
+    for kid in _children(node):
         child = _node_text(kid)
         if child:
             parts.append(child)
@@ -175,7 +181,11 @@ def _walk(node: dict, out: list[StructuredElement], counters: dict) -> None:
             )
         return  # do not descend: cell text belongs to the table, not loose prose
 
-    if node_type in ("heading", "paragraph", "list", "caption"):
+    if node_type == "list":
+        _walk_list(node, out, counters)
+        return
+
+    if node_type in ("heading", "paragraph", "caption"):
         text = _node_text(node)
         if text:
             out.append(
@@ -190,8 +200,51 @@ def _walk(node: dict, out: list[StructuredElement], counters: dict) -> None:
         return  # content already collected from descendants
 
     # container node (document root, "text block", etc.): recurse in order
-    for kid in node.get("kids", []):
+    for kid in _children(node):
         _walk(kid, out, counters)
+
+
+def _walk_list(node: dict, out: list[StructuredElement], counters: dict) -> None:
+    """A list, one item per line (nested items indented), as "list" elements.
+
+    Forms are built from numbered lists -- a net-worth statement's name, assets and
+    summary are all list items -- so the items are text the reader needs, line by line.
+    A table or image inside an item stays a table or image: the lines read so far are
+    emitted first, so reading order holds. A new element starts on each page.
+    """
+    lines: list[str] = []
+    first: dict = {}
+
+    def flush() -> None:
+        if lines:
+            out.append(StructuredElement(type="list", text="\n".join(lines),
+                                         page=int(first.get("page number") or 1),
+                                         bbox=_bbox(first)))
+            lines.clear()
+
+    def items(lst: dict, depth: int) -> None:
+        nonlocal first
+        for item in lst.get("list items", []):
+            if lines and item.get("page number") != first.get("page number"):
+                flush()
+            if not lines:
+                first = item
+            text = [str(item["content"])] if item.get("content") else []
+            text += [_node_text(k) for k in item.get("kids", [])
+                     if (k.get("type") or "").lower() not in ("list", "table", "image")]
+            line = " ".join(t for t in text if t).strip()
+            if line:
+                lines.append("  " * depth + line)
+            for kid in item.get("kids", []):
+                kind = (kid.get("type") or "").lower()
+                if kind == "list":
+                    items(kid, depth + 1)
+                elif kind in ("table", "image"):
+                    flush()
+                    _walk(kid, out, counters)
+
+    items(node, 0)
+    flush()
 
 
 def parse_odl_json(data: dict) -> OdlResult:

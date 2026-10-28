@@ -16,6 +16,8 @@ import type { WorkflowAction } from '../../services/workflowActionsService';
 import { useAuth } from '../../auth/AuthContext';
 import { getSession } from '../../auth/session';
 import { tokens } from '../../theme';
+import CamMarkdown from './CamMarkdown';
+import CamReviewPanel, { type SignalOverrides } from './CamReviewPanel';
 
 /**
  * The CAM workbench — the analyst drafts a Credit Assessment Memo from documents the
@@ -140,6 +142,10 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
   // workpaper the draft was written from (downloadable for verification).
   const [progress, setProgress] = useState('');
   const [workpaper, setWorkpaper] = useState('');
+  // What PRISM checked on the last generated draft (QA, findings, reviewer points), and
+  // the signals the analyst set for the next one.
+  const [review, setReview] = useState<{ qa?: any; findings?: any[]; reviews?: any[] } | null>(null);
+  const [overrides, setOverrides] = useState<SignalOverrides>({});
   const [loading, setLoading] = useState(false);
   const [tplBusy, setTplBusy] = useState(false);
 
@@ -275,6 +281,7 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
         ...(defaults.example ? { template_doc_id: defaults.example.id } : {}),
         ...(pending ? { instruction: pending } : {}),
         doc_titles: Object.fromEntries(sources.map((d) => [d.id, d.title])),
+        ...(Object.keys(overrides).length ? { signal_overrides: overrides } : {}),
       });
       let state = job;
       const started = Date.now();
@@ -295,6 +302,7 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
       setChat((c) => [...c, { role: 'assistant', text: state.draft_md || '' }]);
       setSel(new Set());
       setWorkpaper(state.workpaper_md || '');
+      setReview({ qa: state.qa, findings: state.findings, reviews: state.reviews });
       // The draft is FOR VERIFICATION — hand it over as a Word file straight away.
       if (state.draft_md) {
         await camService.exportDocx(subjectId, state.draft_md,
@@ -467,10 +475,10 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
               </Button>
             )}
             {!!submitted.draft_md && (
-              <Box component="pre" sx={{
-                whiteSpace: 'pre-wrap', fontSize: 12, fontFamily: 'inherit', p: 1.2,
-                border: `1px solid ${tokens.line}`, borderRadius: 1, maxHeight: 320, overflow: 'auto',
-              }}>{submitted.draft_md}</Box>
+              <Box sx={{
+                p: 1.2, border: `1px solid ${tokens.line}`, borderRadius: 1, maxHeight: 420,
+                overflow: 'auto',
+              }}><CamMarkdown text={submitted.draft_md} /></Box>
             )}
             {mayDecide && (
               <>
@@ -711,11 +719,17 @@ export default function CamWorkbenchDialog({ action, subjectId, entityId, onClos
                       px: 1.2, py: 0.7, borderRadius: 2,
                       bgcolor: m.role === 'user' ? '#E7F3F0' : '#F6F8FA',
                       border: `1px solid ${tokens.line}` }}>
-                      <Box component="pre" sx={{ m: 0, whiteSpace: 'pre-wrap',
-                        fontFamily: 'inherit', fontSize: 12.6, lineHeight: 1.55 }}>{m.text}</Box>
+                      {m.role === 'assistant'
+                        ? <CamMarkdown text={m.text} />
+                        : <Box component="pre" sx={{ m: 0, whiteSpace: 'pre-wrap',
+                            fontFamily: 'inherit', fontSize: 12.6, lineHeight: 1.55 }}>{m.text}</Box>}
                     </Box>
                   </Box>
                 ))}
+                {!!review && (
+                  <CamReviewPanel qa={review.qa} findings={review.findings}
+                    reviews={review.reviews} overrides={overrides} onOverrides={setOverrides} />
+                )}
                 {thinking && (
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.8, py: 0.5 }}>
                     <CircularProgress size={13} />

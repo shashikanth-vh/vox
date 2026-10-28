@@ -199,7 +199,7 @@ def test_public_checks_not_performed_become_one_line_for_the_analyst():
     out = compact_checks(table)
     assert "| News search — borrower | PULSE | Verified via PULSE" in out
     assert "NOT PERFORMED —" not in out and "| Tracxn" not in out
-    assert out.endswith("**Not performed by PRISM — for the analyst to complete:** "
+    assert out.endswith("**Not yet performed — for the analyst to complete:** "
                         "Litigation ×2; Listed peer; Tracxn.")
 
 
@@ -314,7 +314,8 @@ async def test_the_term_sheet_is_quoted_verbatim_where_terms_are_written():
     assert "Term sheet table (Head | Terms)." not in appendix      # its spec is replaced
     assert "quoted from the TERM SHEET exactly" in asks["SECTION 4: RECOMMENDATIONS"]
     assert "THE TERM SHEET (verbatim" not in asks["SECTION 2: MANAGEMENT PROFILE"]
-    assert all("Cite sparingly" in u for u in asks.values())
+    # The memo quotes no sources (the credit team's second review).
+    assert all("Do not quote sources" in u for u in asks.values())
     assert any(c["check"] == "Appendix terms match the term sheet" for c in res.qa["checks"])
 
 

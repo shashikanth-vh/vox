@@ -6,6 +6,330 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **CAM: what the committee review of Pulze's third draft found PRISM let through.**
+  - *Guarantors' net worth after their own bureau balances.* Each partner's personal
+    bureau report ("Current" balances) is matched to their net-worth form by name.
+    Cover is graded on assets less the larger of the declared liabilities and those
+    balances: one partner declared Rs 26.5 lakh owed, and his bureau shows Rs 4.45 crore.
+    Below the facility it is AMBER; liabilities above assets is RED. A form whose own
+    sums do not add up is named and is never GREEN (one printed 27.5 + 450 = 470 and
+    470 − 200 = 272.5). The guarantor table shows declared, bureau and net-after-bureau
+    columns.
+  - *No conflict found is no signal.* "Documents that disagree" was GREEN although PRISM
+    compares only the few figures it reads twice.
+  - *DSCR carries this facility's interest.* Rate × amount from the term sheet; leaving
+    it out showed 1.59x where 1.34x was the honest figure. The financial snapshot shows
+    the estimate, marked "(est.)", instead of "not computable".
+  - *The working-capital gap on the first projected year too*, beside the actual one,
+    in the limits table and the signal.
+  - *One amount.* The Recommendation is written first, and the executive and proposal
+    summaries are told its amount. A sub-section recommending another, or more than the
+    cap, goes back for repair, and Machine QA's "One recommended amount" names any that
+    differ.
+  - *Final parts read the body again.* Since the token cut, the sub-sections and repairs
+    of the executive summary and recommendation had been given fact sheets in place of
+    the CAM body they summarise.
+  - *Unsupported claims and unmeetable conditions go back for repair:* a PAN in no
+    document; a market growth figure with no source; audited accounts asked for a year
+    still projected; the existing banker's consent allowed after disbursement.
+  - *The banking section keeps the analysis it names.* When its own sheets overflow,
+    each keeps a floor and the most relevant are given back whole (the BOI month-wise
+    ledger had been cut away). Bank acronyms (BOI, BOB, GST) count as words.
+
+  *Operator:* rebuild `orchestrator` and `workflows`. A rubric copy should take the new
+  guarantor bands, `guarantor_note`, `gap_note` and the conflicts band (`min: 1`). The
+  final parts now run in two waves, a few minutes longer.
+- **CAM: signals that hold up in committee, the limit sized net of the bank, each table
+  once.** A review of Pulze's second draft found green signals the evidence did not
+  support, sizing that ignored the existing banker, and a memo inflated by repeated
+  tables. Now, in code:
+  - *No GREEN on an unaudited year.* Revenue growth on a provisional year is AMBER. A
+    year whose accounts on file are titled provisional or unaudited is locked as
+    provisional, whatever the fact table said, unless an auditor's report for that
+    year is on file. Pulze's FY26 had been locked as audited, so the 31% "audited" growth
+    the base case was capped at included the unaudited jump.
+  - *No GREEN liquidity over a CC drawn past its limit.* Read from the bank statement
+    analysis ("No. of days limit over-drawn"; BOI: 15 days, 12 in the latest month).
+  - *Leverage on what is owed now.* The company bureau report's total outstanding
+    (Rs 528 lakh in July), when above the statements' debt, is used for leverage, and
+    the sentence says so.
+  - *Limit sizing.* The working-capital gap is 75% of current assets, less the other
+    current liabilities, less the existing bank limits. Current-asset cover is stock and
+    debtors after haircuts against the existing limits plus this facility. Both are graded
+    and rendered as `{{table:limits}}`. The margin and haircuts are the rubric's `params`
+    (25% / 50% / 25%).
+  - *DSCR estimated.* When no scheduled principal is on record, DSCR comes from the
+    debt profile's instalments, and the sentence says how it was made.
+  - *One amount, within the cap.* The writers are told the facility cap (the term
+    sheet's, else the Register line's). A sub-section recommending more is sent back to
+    repair.
+  - *Each PRISM table printed once.* Later places refer back to it.
+
+  *Operator:* rebuild `orchestrator` and `workflows`. A deployment with its own rubric
+  copy (`WORKFLOWS_CAM_RUBRIC_PATH`) should take the new `params`, `green_needs`,
+  `append` and the `wc_gap` and `ca_cover` rules from `app/cam_rubric.json`.
+- **CAM v2: lighter outline and repair calls (tokens).** On Pulze's latest draft (6.19M
+  input tokens), every sub-section was repaired: 53 repairs re-sent about 39k tokens of
+  context each (2.05M), and 12 outline calls read their part's whole context (1.07M).
+  A repair fixes named points in text already written. It now gets the figures it may
+  quote, plus a third of the sub-section's sheets, chosen by its topic and its issues.
+  It runs at `WORKFLOWS_CAM_REPAIR_REASONING_EFFORT` (default `low`; empty = the
+  engine's own effort). The outline sees every sheet, the longest shortened first, at
+  twice a sub-section's budget. `WORKFLOWS_CAM_SUB_SHEET_CHARS=0` still sends the whole
+  context everywhere. Sections, the fact table, the critic and the final sections keep
+  the engine's effort. *Operator:* rebuild `orchestrator` and `workflows`; Helm
+  `api.cam.repairReasoningEffort`.
+- **CAM v2: every sub-section sees all of its own documents.** The token cut took a
+  sub-section's own kinds of document whole, one after another, until its budget ran
+  out, so the rest were dropped. Pulze's banking sub-section never saw the BOI statement
+  and wrote the CC's quarterly credits and debits "not on record". Every own-kind sheet
+  now arrives, with the longest shortened first, within 60% of the budget. The rest goes
+  to other sheets that name what the sub-section covers. A word counts for more the fewer
+  sheets carry it, so a customer's name outranks a word every sheet shares.
+  *Operator:* rebuild `orchestrator` and `workflows`.
+- **CAM: "documents that disagree" compares the same year only.** Facts read from
+  statements carried no year, so FY23's and FY24's accounts (same group names) were
+  named as conflicts. Two of the three were lines carried from one year's account to the
+  next ("Gross Profit b/d", "Net Profit b/d"). A statement's year now comes from its
+  year-end date ("as at 31st March 2024") or, failing that, its name. Carried lines are
+  not facts. A statement with no year found is not compared with another document.
+  *Operator:* rebuild `orchestrator` and `workflows`.
+- **CAM: two more consistency checks on the fact table.** Pulze's second draft
+  locked FY26 current liabilities below its own creditors plus the CC (current ratio
+  2.07, "healthy liquidity"). It also took FY24–25 PBDIT before partners' remuneration and
+  FY26 after it, which showed a margin fall that was not there. The fact table now also
+  states partners' remuneration and tax, and PBDIT is defined after remuneration. Code
+  names both errors: creditors plus WC debt above current liabilities, and PBDIT that
+  reconciles to PAT only once remuneration is deducted. Either sends the fact table back
+  for its one re-read. *Operator:* rebuild `orchestrator` and `workflows`. The fact
+  table's cache key changes, so the next CAM on each file rebuilds it once.
+- **DocRAG: numbered lists in PDFs are read.** OpenDataLoader keeps a list's entries
+  under "list items", but DocRAG read only "kids", so every numbered list in a PDF came
+  through empty. A net-worth form is built from such lists. Its name, assets and summary
+  were lost and only the liabilities table survived. That is why the CAM kept calling the
+  guarantors' forms "liabilities-only"; HTML tables were not the cause. Lists now come
+  through one item per line, nested items indented. A table inside an item stays a
+  table, in reading order. Pages that held only lists may also have been sent to OCR as
+  "near-empty", and now read locally. *Operator:* rebuild `docrag` on the host that runs
+  it. Its cache key gains a PDF version (`-p2`), so every cached PDF is read again on
+  first use. Workbooks keep their cache. Scanned pages go through Sarvam OCR again,
+  which costs Sarvam pages once per document.
+- **CAM: a long statement no longer freezes the service.** With OCR'd tables now read as
+  tables, a long statement's "Total" rows reached the statement-totals search. That
+  search grew with the cube of the figures on the page and ran on the service's event
+  loop, so a CAM on a large file held the orchestrator at 100% CPU and the workbench
+  showed "PRISM could not be reached". The search is now bounded: a total is matched to
+  a run ending among its 12 nearest items, spanning at most 300 lines. It took 0.3 s on
+  a case that ran past a minute. The per-document arithmetic also runs in a thread.
+  *Operator:* rebuild `orchestrator` and `workflows`. A CAM running at the time of the
+  deploy stops; start it again.
+- **CAM v2: each sub-section reads its own documents (tokens).** One CAM on a 68-document
+  file sent Sarvam 13.3M input tokens: every sub-section and every repair carried its
+  part's whole context, about 100k tokens, to write about 300 words. Those calls now get
+  the locked dataset, ledger, findings, tables and rules whole, plus only the fact sheets
+  relevant to them. The part's own kinds of document come first, then those that mention
+  what the sub-section covers, up to `WORKFLOWS_CAM_SUB_SHEET_CHARS` (default 60000;
+  0 sends the whole context as before). The outline call, which plans the part, still
+  reads everything. *Operator:* rebuild `orchestrator` and `workflows`; Helm
+  `api.cam.subSheetChars`.
+- **CAM: OCR'd tables read correctly.** DocRAG passes Sarvam OCR pages through with tables
+  as raw HTML (`<table><tr><td>`). The CAM's readers expect cells split by `|`, so on a
+  scanned file they took `<td>` for a statement group's label. The draft then called a
+  tied balance sheet unrebuildable, listed "documents that disagree" by tag, and missed
+  every guarantor's declared assets. It called the net-worth forms "liabilities-only".
+  Embedded HTML tables now become Markdown tables as DocRAG text enters the CAM, the
+  net-worth summary reads a cell border as well as a colon, and no fact is keyed by
+  markup. The "to complete" line in the public checks no longer names PRISM.
+  *Operator:* rebuild `orchestrator` and `workflows`. DocRAG's cache needs no clearing,
+  because the conversion runs on its output.
+- **Generate CAM from Company 360.** The company brief's header has a *Generate CAM* button
+  that opens the same CAM workbench as the lending line's pipeline. A CAM belongs to a
+  lending line, so the button asks the workflow plane for that line's CAM step and
+  follows its answer: a role or stage that may not prepare a CAM sees the plane's
+  reason. One live lending line opens directly; several show a menu; none disables the
+  button with the reason. The Company 360 payload now carries each lending line's `id`.
+  *Operator:* rebuild `register` and `ui`; no settings or migrations.
+- **Admin can open the CAM workbench at any stage.** The CAM step is normally offered
+  only before the committee decision (Data Awaited, Diligence, Note Circulated). An Admin
+  now gets it at every stage, for a renewal, a re-look or a file being rebuilt. Other
+  roles and other steps keep their sequence. *Operator:* rebuild `orchestrator` and `workflows`.
+- **News: fewer false UGLY, fewer missed stories, and old findings re-judged.** Cipher-test
+  showed more UGLY than production, though both run the same PULSE code. Its 12-month
+  history pass on 16 Oct had filed stories that were never judged again: of 13 UGLY,
+  10 were namesakes, everyday phrases or NCLT merger hearings. And news printed under
+  a firm's legal name, or under its full name when news names were set, was never
+  searched.
+  - *Names searched.* The trading name without "Limited" / "Pvt Ltd", the legal name
+    when it differs, and the analyst's news names, which now add to the full name
+    instead of replacing it, plus the short name. An everyday phrase ("Green Energy",
+    "Sun Power") counts as a name only when the analyst sets it.
+  - *Who a story is about.* The name must be printed as a name: capitalised, not
+    "an organic-framework probe". A story found only under the automatic short name must also
+    carry the firm's sector words or city, so a semiconductor maker or a village with
+    the same short name is dropped.
+  - *Triage.* "Probe" is adverse only as an investigation (police, an agency, "probe
+    into"), never a "probe maker" or a lab probe. NCLT merger, demerger and scheme
+    hearings are restructuring, not distress; insolvency, CIRP and liquidation stay
+    UGLY on their own words.
+  - *Re-check.* Once a day, before the night's first batch, every filed story is judged
+    again by today's rules. A namesake is dismissed and a changed colour re-graded, with
+    the reason in the row's payload (`recheck`) and the row's version respected. Nothing
+    is deleted. `POST /v1/news/monitor/recheck` runs it now, and the monitor status shows
+    the last counts. Official records and stories about a person keep their own matching.
+  - *Checked on cipher-test's 2,759 findings,* which found four rules too strict. Fixed:
+    a brand written in lower case ("e-…") is accepted as printed; three ordinary words
+    together are a company's name; a story printing the registered name with its
+    corporate suffix is about the firm, even when the trading name is everyday; and the
+    sector words now cover PV, modules, inverters, 2W/3W, vehicles, LNG/CNG, ethanol and
+    electricals. The re-check also restores what it dismissed when today's rules say the
+    story is about the firm (`dismissed_by: recheck`). A person's dismissal is never
+    touched.
+  *Operator:* rebuild `pulse`. There is no setting or data change. The first night's
+  re-check dismisses and re-grades old noise.
+
+- **CAM harness v2, complete: the credit picture from the rubric, sections written
+  sub-section by sub-section and reviewed, and the CAM shown properly in the workbench.**
+  - *Findings and the credit rubric* (`cam_findings.py`, `cam_rubric.json`). Code sets
+    each signal from the CAM prompt's A3 bands, on figures PRISM computed or read:
+    - CMR rank, DSCR or interest coverage, leverage, current ratio and revenue growth;
+    - whether the statements tie;
+    - the guarantors' declared net worth against the facility;
+    - documents that disagree.
+    Each finding carries its evidence, its home section, what offsets it and what
+    resolves it. The writer explains a finding and never re-grades it. PRISM renders the
+    "Credit picture at a glance" table from the findings (`{{table:picture}}`). The
+    credit team owns the rubric: point `WORKFLOWS_CAM_RUBRIC_PATH` at an edited copy.
+  - *Plan, write, review, repair.*
+    - Each narrative part is first planned as 2–7 sub-sections; every finding it owns
+      and every table it needs is assigned once.
+    - Each sub-section is written in its own call and told what the others cover, so a
+      concern is argued once.
+    - The part is checked by PRISM (figures, statements, net-worth forms, plain
+      language, missing-document claims) and by a reviewer call against the credit
+      team's review standards.
+    - Only the sub-sections that failed are rewritten, once.
+    `WORKFLOWS_CAM_CRITIC_ENGINE` can put the review on a stronger engine while the
+    writing stays on the CAM engine. The appendix and annexures keep the single call,
+    and a plan that cannot be read falls back to it.
+  - *Repetition.* A new Machine QA check names parts that share whole passages. It
+    applies to both harnesses.
+  - *The workbench shows the CAM as a document,* not raw Markdown: headings, prose,
+    lists and full tables, with signal and severity cells shaded as in Word. Beside the
+    draft, a "What PRISM checked" panel shows Machine QA, the findings with their
+    signals, and what the reviewer sent back. The analyst can set a finding's signal for
+    the next draft, with a reason, and the CAM states it as the analyst's call
+    (`signal_overrides` on the draft request).
+  *Operator:* rebuild `workflows`, `orchestrator` and `ui`. The new settings are
+  `WORKFLOWS_CAM_CRITIC_ENGINE` and `WORKFLOWS_CAM_RUBRIC_PATH` (Compose; Helm
+  `api.cam.criticEngine` / `rubricPath`), both empty by default. v2 makes more but
+  smaller calls per part (plan, sub-sections, review, repairs).
+
+- **CAM harness v2: PRISM reads the figures, the model writes around them, and every
+  change is scored.** The CAM engine (Sarvam glm) writes well but reads unreliably, so
+  the facts a CAM rests on now come from code. This is opt-in per deployment
+  (`WORKFLOWS_CAM_HARNESS=v2`) or per draft (`"harness": "v2"`). v1 is unchanged and stays
+  the default until v2 scores better on the golden cases.
+  - *Fact ledger* (`cam_facts.py`). Read by code:
+    - statement groups and net worth;
+    - guarantors' declared net assets;
+    - every row of a debt-profile table (rupees converted to lakh);
+    - CC/OD limits from bank analyses;
+    - the company bureau rank.
+    Where two documents disagree, both are named as a conflict for the analyst. Every
+    writer and the dataset step get the ledger.
+  - *Tables PRISM renders.* The financial snapshot (locked figures and PRISM's ratios),
+    the newest debt profile with totals, and the guarantors' declared net worth. A writer
+    places one with `{{table:debt}}` and never retypes it. Machine QA reports where each
+    table landed, and lists the conflicts.
+  - *Eval harness* (`cam_eval.py`). It scores a draft against a golden case: the
+    figures a correct CAM states, at the precision it prints them; what it must never
+    say; what it must contain; and tone metrics (source tags, rule codes, "not on
+    record", signal colours, High ratings). Run `python -m app.cam_eval case.json
+    draft.md [job.json]`. Golden cases hold client facts, so keep them outside the
+    repository.
+  *Operator:* rebuild `workflows`. The new setting is `WORKFLOWS_CAM_HARNESS` (Compose; Helm
+  `api.cam.harness`), default `v1`.
+
+- **The CAM follows the credit team's review sheet: no sources quoted, the data that
+  can't be missed, net worth read right.** The reviewed CAM came back with a list of data
+  points a CAM cannot miss and a tone brief: neutral, factual, no source quoting, more
+  analytical and observational than critical. Changes:
+  - *No sources in the memo.* Writers are told not to cite, and every `[source: …]` tag
+    and "Source:" line is removed in code. The trail stays in the workpaper and Machine
+    QA.
+  - *Plain language.* No prompt rule codes (A3.x, Rule N, Phase B), no PRISM or tool
+    talk ("not configured", "this deployment"), and no notes to the reader ("Honest
+    assessment:"). A section that slips is sent back once, and anything left is named in
+    Machine QA under "Plain language".
+  - *Observational.* Each section leads with the business and its exposure, and uses the
+    numbers as evidence rather than the story. No speculation beyond the documents.
+    "Mitigant: none" is never the answer; the writer gives what offsets the risk, or the
+    condition that would.
+  - *Net worth.* TNW includes the year's profit not yet moved to capital (a P&L A/c
+    balance on the liabilities side). PRISM states net worth from the statement's own
+    figures, and a TNW locked at capital alone goes back to the dataset step. Projected
+    columns take every figure the CMA gives.
+  - *Guarantors' declared assets.* PRISM reads the net-worth (assets & liabilities)
+    forms itself: each declared asset and the form's own summary. A draft that says
+    "liabilities only" or "no asset side" goes back. The reviewed CAM said that of four
+    forms that declared Rs 60–470 lakh of assets each.
+  - *Word 97 `.doc` files are read.* They used to be refused as "no extractor"; net-worth
+    statements often arrive as `.doc`. The text is recovered without its layout, and the
+    document says so.
+  - *Call memos, meeting notes and transcripts* are their own document type, quoted in
+    full to the business and management sections, like the profile and the deck.
+  - *Data that can't be missed.* A new Machine QA check names any supplied document
+    whose data never reached the CAM (no significant figure, and fewer than three of the
+    words only it holds). It is grouped as the credit team lists them: constitutional,
+    financials, decks and reference documents, bank / GST / ITR, term sheet, order book,
+    and banking limits.
+  - *Industry news.* The borrower's sector news from PULSE (last six months) is given as
+    context for the industry analysis.
+  *Operator:* rebuild `workflows`. There is no setting or data change. The document reader's
+  input changes for statements and net-worth forms, so those few documents are read again
+  once.
+
+- **The CAM analyses the negatives instead of telling them, and reads statements as
+  printed.** The credit team found a recent CAM "too negative, as if nothing is good".
+  Its two worst red flags were misreads of Tally layout, where a group total sits above
+  the ledger lines that make it up. A balance sheet that ties to the paise was called
+  unbalanced. A closing-stock group (closing stock + goods in transit) was called
+  "printed twice". A loans group (OD + secured + unsecured) was called unexplained. And
+  sales were locked at the domestic line, without exports. Changes:
+  - *Statement arithmetic.* PRISM now works out each statement's groups and totals
+    itself, exactly (`statement_math.py`), and gives that to every reader. A dataset
+    or section that still calls a tied statement unbalanced, or a group a double count
+    or unexplained, goes back through the existing single correction pass. If it
+    survives, Machine QA fails it under "Statements read as printed".
+  - *Locked figures.* Sales are the whole sales group, export included. An unsecured
+    loan with no named lender counts as debt; it is a promoter loan only when a document
+    names the promoters as lender. Debt is compared at the same date: a March balance is
+    not "understated" by a July bureau total.
+  - *Balance.* Each document is read for strengths as well as gaps. Each concern is
+    argued once, in the section that owns it, and pointed to elsewhere. "High" is kept
+    for a direct path to loss on this facility. A document not yet supplied is an item
+    to obtain, not a risk. A check PRISM cannot run stays in the public-checks log. No
+    inferring motive or distress; age is not a risk by itself.
+  - *Colour.* Each concern is written in four beats: what the evidence shows, why it
+    matters here, what offsets it, and what resolves it. Weighing tables carry a Signal
+    column of GREEN / AMBER / RED. The Executive Summary opens with a "Credit picture at a
+    glance" table. The Word CAM and the IRG report shade signal cells, and severities
+    (High / Moderate / Low) in a Severity / Risk / Rating column. Machine QA reports the
+    colour count and warns when a draft has RED and no GREEN.
+  - *Management.* A promoter, management or team profile (CVs, bios) is its own document
+    type. It goes to the Management section and is quoted there verbatim, like the
+    company profile.
+  - *News.* The CAM now reads what the PULSE monitor filed for the firm in the Register
+    (as the caller; dismissed rows left out), with who each story is about, the name it
+    matched and the evidence reading (allegation, action or outcome). The live search
+    covers the legal name, trading name and news aliases, plus the Register's key people
+    and the Tracxn board. A person's headline must give their full name, and a firm's
+    name must appear as a whole word, so a surname or a namesake no longer counts. This
+    applies to the risk grade too.
+  *Operator:* rebuild `workflows`. There is no setting or data change. The document
+  reader's instructions changed, so the next CAM or IRG re-reads every document once
+  (about 1.6M input tokens for a 70-file case) before the cache takes over again.
+
 - **The news digest shows the whole window, not only what is new.** A digest titled
   "last 7 days" sent only stories it had not sent before, so a quiet morning read "0"
   while the week held adverse news (production, 20–23 Oct: four adverse stories in the

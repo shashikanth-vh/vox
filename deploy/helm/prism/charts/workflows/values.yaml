@@ -129,6 +129,14 @@ api:
       existingSecretKey: cam-llm-api-key
     # Documents read at this effort (the analysis keeps the engine's), N calls at a time.
     digestReasoningEffort: "low"
+    repairReasoningEffort: "low"
+    # v1 | v2 (PRISM reads known layouts into a fact ledger and renders their tables)
+    harness: "v1"
+    # v2 reviewer engine ("" = the CAM engine) and the credit rubric ("" = packaged A3 bands)
+    criticEngine: ""
+    rubricPath: ""
+    # v2: fact-sheet characters per sub-section call, most relevant first (0 = whole context)
+    subSheetChars: 60000
     pipelineConcurrency: 8
     # Fact sheets between drafts: a path on a volume you mount (empty = memory only).
     digestCacheDir: ""

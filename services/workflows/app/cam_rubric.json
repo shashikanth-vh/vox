@@ -1,0 +1,68 @@
+{
+  "_about": "The credit rubric the v2 CAM harness sets signals from (cam_findings.py). Bands follow the EVAM CAM prompt's A3 tables; the credit team owns this file — change a threshold or a sentence here, not in code. Signals: GREEN supports the credit, AMBER to watch or resolve, RED a direct, unmitigated path to loss on this facility. Point WORKFLOWS_CAM_RUBRIC_PATH at an edited copy to use it. A rule's \"green_needs\" lists conditions under which its GREEN is AMBER instead (unaudited: the period is not audited; cc_overdrawn: a CC/OD went over its limit); \"append\" adds PRISM's note to its sentence No conflict found is no signal at all: PRISM compares only the few figures it reads twice. (leverage_note: leverage on the bureau's current outstanding when that is above the statements' debt; dscr_note: how an estimated DSCR was made). \"params\": the borrower's margin and the haircuts the limit sizing and current-asset cover use.",
+  "params": {"wc_margin": 0.25, "stock_haircut": 0.5, "debtor_haircut": 0.25},
+  "rules": [
+    {"id": "bureau_company", "topic": "Company bureau rank (CMR)", "home": "MANAGEMENT|BUREAU|GOVERNANCE",
+     "metric": "cmr", "bands": [
+       {"max": 3, "signal": "GREEN", "says": "CMR-{v:.0f} — low risk on the bureau's own scale"},
+       {"max": 5, "signal": "AMBER", "says": "CMR-{v:.0f} — moderate; the drivers should be noted"},
+       {"max": 7, "signal": "AMBER", "says": "CMR-{v:.0f} — elevated; needs explanation and covenant protection"},
+       {"max": 99, "signal": "RED", "says": "CMR-{v:.0f} — high risk; deal-level justification required"}],
+     "resolve": "Bureau refresh before disbursement"},
+    {"id": "dscr", "topic": "Debt service (DSCR)", "home": "FINANCIAL", "metric": "DSCR", "append": "dscr_note", "bands": [
+       {"min": 1.5, "signal": "GREEN", "says": "DSCR {v:.2f}x in {p} — adequate to comfortable"},
+       {"min": 1.2, "signal": "AMBER", "says": "DSCR {v:.2f}x in {p} — tight; monitored, stress-tested"},
+       {"min": -99, "signal": "RED", "says": "DSCR {v:.2f}x in {p} — stressed"}],
+     "resolve": "Quarterly DSCR covenant", "offset_by": ["bureau_company", "guarantor_cover"]},
+    {"id": "interest_cover", "topic": "Interest coverage", "home": "FINANCIAL", "metric": "Interest Coverage",
+     "only_without": "DSCR", "bands": [
+       {"min": 2.0, "signal": "GREEN", "says": "PBDIT covers interest {v:.2f}x in {p}"},
+       {"min": 1.5, "signal": "AMBER", "says": "PBDIT covers interest {v:.2f}x in {p} — thin headroom"},
+       {"min": -99, "signal": "RED", "says": "PBDIT covers interest only {v:.2f}x in {p}"}],
+     "resolve": "Interest-coverage covenant at 1.5x", "offset_by": ["bureau_company", "guarantor_cover"]},
+    {"id": "leverage", "topic": "Leverage (Total debt / Adj. TNW)", "home": "FINANCIAL", "metric": "Total Debt / Adj. TNW",
+     "append": "leverage_note", "bands": [
+       {"max": 3.0, "signal": "GREEN", "says": "Total debt is {v:.2f}x adjusted net worth in {p} — within the growth-stage MSME band"},
+       {"max": 5.0, "signal": "AMBER", "says": "Total debt is {v:.2f}x adjusted net worth in {p} — elevated; needs cash-flow support"},
+       {"max": 999, "signal": "RED", "says": "Total debt is {v:.2f}x adjusted net worth in {p} — highly leveraged"}],
+     "resolve": "Cap on further borrowing without Evam's consent", "offset_by": ["guarantor_cover", "bureau_company"]},
+    {"id": "liquidity", "topic": "Liquidity (current ratio)", "home": "FINANCIAL|WORKING CAPITAL", "metric": "Current Ratio",
+     "green_needs": ["cc_overdrawn"], "bands": [
+       {"min": 1.2, "signal": "GREEN", "says": "Current ratio {v:.2f} in {p}"},
+       {"min": -99, "signal": "AMBER", "says": "Current ratio {v:.2f} in {p} — working capital is tight"}],
+     "resolve": "Drawing-power and stock-statement discipline"},
+    {"id": "growth", "topic": "Revenue trajectory", "home": "FINANCIAL", "metric": "Revenue growth YoY",
+     "green_needs": ["unaudited"], "bands": [
+       {"min": 0, "signal": "GREEN", "says": "Revenue grew {v:.1f}% in {p}"},
+       {"min": -999, "signal": "AMBER", "says": "Revenue fell {a:.1f}% in {p}"}],
+     "resolve": "Quarterly sales run-rate monitoring"},
+    {"id": "statements", "topic": "Financial statements", "home": "FINANCIAL", "metric": "statements_tie",
+     "bands": [
+       {"min": 1, "signal": "GREEN", "says": "The statements tie to their printed totals, group by group"},
+       {"min": -1, "signal": "AMBER", "says": "A statement's printed total could not be rebuilt from its groups"}],
+     "resolve": "Audited statements to confirm"},
+    {"id": "guarantor_cover", "topic": "Guarantors' net worth", "home": "SECURITY",
+     "metric": "guarantor_cover", "append": "guarantor_note", "green_needs": ["guarantor_form_off"], "bands": [
+       {"min": 2.0, "signal": "GREEN", "says": "Guarantors' net assets come to Rs. {total:,.1f} lakh — {v:.1f}x the facility"},
+       {"min": 1.0, "signal": "AMBER", "says": "Guarantors' net assets come to Rs. {total:,.1f} lakh — {v:.1f}x the facility"},
+       {"min": 0, "signal": "AMBER", "says": "Guarantors' net assets come to Rs. {total:,.1f} lakh — below the facility"},
+       {"min": -999, "signal": "RED", "says": "Guarantors' net assets come to Rs. {total:,.1f} lakh — their liabilities exceed their assets"}],
+     "resolve": "CA-certified net-worth statements with asset evidence"},
+    {"id": "wc_gap", "topic": "Limit sizing (working-capital gap after existing bank limits)", "home": "WORKING CAPITAL|RECOMMENDATION",
+     "metric": "wc_gap_cover", "append": "gap_note", "bands": [
+       {"min": 1.0, "signal": "GREEN", "says": "The working-capital gap after existing bank limits is Rs. {gap:,.1f} lakh in {p} — it covers the Rs. {facility:,.1f} lakh facility"},
+       {"min": 0.0, "signal": "AMBER", "says": "The working-capital gap after Rs. {limits:,.1f} lakh of existing bank limits is Rs. {gap:,.1f} lakh in {p} — below the Rs. {facility:,.1f} lakh facility; size the limit to the gap"},
+       {"min": -999, "signal": "AMBER", "says": "Existing bank limits of Rs. {limits:,.1f} lakh already exceed the permissible bank finance in {p} (gap Rs. {gap:,.1f} lakh) — the facility funds no assessed gap"}],
+     "resolve": "Drawing-power formula and the existing banker's consent"},
+    {"id": "ca_cover", "topic": "Current-asset cover after haircuts", "home": "SECURITY|WORKING CAPITAL",
+     "metric": "ca_cover", "bands": [
+       {"min": 1.25, "signal": "GREEN", "says": "Stock and debtors after haircuts give Rs. {cover_value:,.1f} lakh — {v:.2f}x the Rs. {cover_owed:,.1f} lakh of working-capital lending (existing limits plus this facility)"},
+       {"min": 1.0, "signal": "AMBER", "says": "Stock and debtors after haircuts give Rs. {cover_value:,.1f} lakh — only {v:.2f}x the Rs. {cover_owed:,.1f} lakh of working-capital lending"},
+       {"min": -99, "signal": "RED", "says": "Stock and debtors after haircuts give Rs. {cover_value:,.1f} lakh — {v:.2f}x, below the Rs. {cover_owed:,.1f} lakh of working-capital lending"}],
+     "resolve": "Stock audit; pari passu charge with the existing banker's consent"},
+    {"id": "document_conflicts", "topic": "Documents that disagree", "home": "FINANCIAL|BANK", "metric": "conflicts",
+     "bands": [
+       {"min": 1, "signal": "AMBER", "says": "{v:.0f} figure(s) differ between documents: {detail}"}],
+     "resolve": "Reconcile with the lender / source before documentation"}
+  ]
+}

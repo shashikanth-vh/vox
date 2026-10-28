@@ -39,6 +39,10 @@ PIPELINE_VERSION = "1"
 # its cached result. 2: sheets whose <dimension> tag says A1 are read in full.
 SHEET_VERSION = "2"
 _SHEETS = (".xlsx", ".xlsm", ".xls")
+# PDFs likewise, bumped when only the PDF reader changes. A re-read PDF goes through
+# OCR again for its scanned pages. 2: numbered lists are read (they came back empty, so
+# a net-worth form lost its name, assets and summary).
+PDF_VERSION = "2"
 _TRANSIENT = ("Sarvam Doc AI failed", "Sarvam returned no content")
 
 
@@ -124,8 +128,10 @@ class Extractor:
                 use_sarvam: bool) -> dict[str, Any]:
         started = time.monotonic()
         digest = hashlib.sha256(data).hexdigest()
+        suffix = Path(filename).suffix.lower()
         key = f"{digest}-{'s' if use_sarvam else 'n'}-v{PIPELINE_VERSION}" + (
-            f"-x{SHEET_VERSION}" if Path(filename).suffix.lower() in _SHEETS else "")
+            f"-x{SHEET_VERSION}" if suffix in _SHEETS
+            else f"-p{PDF_VERSION}" if suffix == ".pdf" else "")
         path = self.root / tenant / f"{key}.json"
         # One extraction per file at a time: concurrent requests for the same document
         # (two analysts, a retried turn) wait for the first instead of paying twice.
@@ -141,7 +147,6 @@ class Extractor:
                                 "ocr_pages": hit.ocr_pages})
                 return hit.as_dict(cached=True, seconds=time.monotonic() - started)
 
-            suffix = Path(filename).suffix.lower()
             with tempfile.TemporaryDirectory() as tmp:
                 src = Path(tmp) / f"source{suffix}"
                 src.write_bytes(data)

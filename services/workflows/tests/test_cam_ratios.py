@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 
-from app.cam_ratios import Figures, Period, assessments, cagr, compute, parse_figures, \
-    ratios_markdown
+from app.cam_ratios import Figures, Period, assessments, cagr, compute, consistency, \
+    parse_figures, ratios_markdown
 
 FY24 = {"net_sales": 1000, "cogs": 700, "purchases": None, "pbdit": 150, "depreciation": 20,
         "non_cash_charges": None, "interest_total": 40, "interest_term_debt": 25,
@@ -103,3 +103,25 @@ def test_a_missing_or_broken_block_says_why():
     assert fig is None and why.startswith("the locked-figures block could not be read")
     assert parse_figures('```locked-figures\n{"periods": []}\n```')[2] == \
         "the locked-figures block has no periods"
+
+
+def test_current_liabilities_below_creditors_and_the_cc_are_a_misread():
+    """A second Pulze draft locked FY26 current liabilities below its own creditors plus
+    the CC, and wrote a 2.07 current ratio up as healthy liquidity."""
+    bad = Period("FY26", "provisional", {**FY24, "trade_payables": 288, "wc_debt": 179,
+                                         "current_liabilities": 332, "current_assets": 690})
+    assert any("trade payables + working-capital debt 467 exceed current liabilities 332" in f
+               for f in consistency(Figures([bad])))
+    assert consistency(Figures([Period("FY24", "audited", dict(FY24))])) == []
+
+
+def test_pbdit_before_partners_remuneration_is_named():
+    """PBDIT less depreciation, interest and tax leaving PAT plus the partners'
+    remuneration was struck before it — the mixed basis that read as a margin fall."""
+    firm = {**FY24, "pbdit": 106, "depreciation": 10, "interest_total": 24, "tax": 8,
+            "pat": 24, "partners_remuneration": 40}
+    flags = consistency(Figures([Period("FY24", "audited", firm)]))
+    assert any("before partners' remuneration 40" in f for f in flags)
+    after = {**firm, "pbdit": 66}
+    assert not any("remuneration" in f for f in consistency(Figures([Period("FY24", "audited",
+                                                                            after)])))

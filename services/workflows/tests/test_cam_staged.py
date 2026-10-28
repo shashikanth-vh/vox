@@ -565,7 +565,10 @@ async def test_a_source_not_held_is_named_not_filled(monkeypatch):
     checks = next(u for _s, u in eng.fake.calls if "Public information checks" in u)
     assert job["status"] == "done"
     assert "Tracxn (company filings): not available — Not fetched from Tracxn yet." in checks
-    assert "PULSE (news): not configured on this deployment." in checks
+    assert "PULSE (live news search): not configured on this deployment." in checks
+    # The monitor's filed findings are a Register read, named when the Register cannot
+    # answer it — never left silent.
+    assert "PULSE monitor findings (Register): not readable (HTTP 404)" in checks
 
 
 async def test_a_figure_not_in_the_workpaper_is_dropped_and_named():

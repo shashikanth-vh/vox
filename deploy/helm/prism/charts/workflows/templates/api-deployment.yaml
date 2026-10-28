@@ -140,6 +140,16 @@ spec:
             {{- end }}
             - name: WORKFLOWS_CAM_DIGEST_REASONING_EFFORT
               value: {{ .Values.api.cam.digestReasoningEffort | default "" | quote }}
+            - name: WORKFLOWS_CAM_REPAIR_REASONING_EFFORT
+              value: {{ .Values.api.cam.repairReasoningEffort | default "" | quote }}
+            - name: WORKFLOWS_CAM_HARNESS
+              value: {{ .Values.api.cam.harness | default "v1" | quote }}
+            - name: WORKFLOWS_CAM_CRITIC_ENGINE
+              value: {{ .Values.api.cam.criticEngine | default "" | quote }}
+            - name: WORKFLOWS_CAM_RUBRIC_PATH
+              value: {{ .Values.api.cam.rubricPath | default "" | quote }}
+            - name: WORKFLOWS_CAM_SUB_SHEET_CHARS
+              value: {{ .Values.api.cam.subSheetChars | toString | quote }}
             - name: WORKFLOWS_CAM_PIPELINE_CONCURRENCY
               value: {{ .Values.api.cam.pipelineConcurrency | default 8 | quote }}
             {{- with .Values.api.cam.digestCacheDir }}

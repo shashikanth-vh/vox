@@ -69,6 +69,20 @@ def test_a_parked_line_is_told_how_to_reopen_not_that_it_is_past_the_point():
                                 run_state="none")[0]
 
 
+def test_an_admin_may_open_the_cam_workbench_at_any_stage():
+    """The CAM's stage gate binds the credit desk, not an Admin: a line already past the
+    committee (or parked) can still have a CAM prepared when an Admin asks. The other
+    steps keep their sequence for everyone."""
+    cam = _action("cam.workbench")
+    for stage in ("Sanctioned", "Disbursed", "Rejected", "On Hold"):
+        assert _evaluate_action(cam, roles={"Admin"}, stage=stage, run_state="none") == (True, "")
+        assert not _evaluate_action(cam, roles={"Credit Head"}, stage=stage,
+                                    run_state="none")[0]
+    start = _action("deal-structuring.start")
+    assert not _evaluate_action(start, roles={"Admin"}, stage="Sanctioned",
+                                run_state="none")[0]
+
+
 def test_role_gate_names_who_does_the_step():
     """A refusal that names the role is actionable; "not permitted" is not."""
     disburse = _action("disburse")

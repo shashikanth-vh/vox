@@ -151,6 +151,7 @@ async def test_panorama_tells_the_whole_story(reg: AsyncClient):
 
     lend = p["lending"][0]
     assert lend["stage"] == "Note Circulated"
+    assert lend["id"]                    # Company 360 opens the CAM workbench on it
     assert lend["pending_with"] == "Credit"
     assert "Note Circulated" in lend["ladder"] and lend["ladder"][0] == "Data Awaited"
 

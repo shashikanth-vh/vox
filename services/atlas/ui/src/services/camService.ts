@@ -164,6 +164,8 @@ export const camService = {
   async draftStaged(lendingId: string, input: {
     source_doc_ids: string[]; prompt_doc_id?: string; prompt_text?: string;
     template_doc_id?: string; instruction?: string; doc_titles?: Record<string, string>;
+    // v2: the analyst's signals for this draft, by finding id, each with a reason.
+    signal_overrides?: Record<string, { signal: string; note: string }>;
   }): Promise<any> {
     try {
       return await orchestrator.post<any>(`/v1/cam/${lendingId}/draft`, input,

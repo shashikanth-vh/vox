@@ -12,6 +12,7 @@ import { apiErr } from '../../api/http';
 import { panoramaService, type Panorama, type PanoramaLine, type TracxnFinancials,
   type TracxnSeries, type RiskGrade } from '../../services/panoramaService';
 import { BAND_COLOR, RiskGradeChip, RiskGradeDetails } from './RiskGrade';
+import CamFrom360 from '../workflow/CamFrom360';
 import { documentsService } from '../../services/documentsService';
 import { classify, fetchTerm, SEV_LABEL, type Article, type Severity }
   from '../../services/newsService';
@@ -646,6 +647,9 @@ export default function Company360Dialog({ open, entityId, company, onClose }: {
           flexWrap: 'wrap', minWidth: 0 }}>
           <RiskGradeChip grade={grade} busy={gradeBusy} error={gradeErr}
             canGrade={!!p && (news !== null || !!newsErr)} onGrade={runGrade} />
+          {p && <CamFrom360 entityId={p.anchor.entity_id}
+            lines={liveLend.filter((r) => r.id).map((r) => ({ id: r.id!,
+              label: `${lendName(r)} — ${r.stage || '—'} · ${fmtCr(r.amount_cr)}` }))} />}
           {small && <Box sx={{ flex: 1 }} />}
           <Button size="small" variant="contained" startIcon={<DownloadIcon />}
             onClick={() => window.print()}>Download</Button>

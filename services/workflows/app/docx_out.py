@@ -211,11 +211,37 @@ def _col_widths(rows: list[list[str]]) -> list[int]:
     return [int(w * scale) for w in widths]
 
 
+# Signal colours (fill, text) — the credit picture read at a glance. A cell that IS a
+# signal ("GREEN", "AMBER — to resolve") is shaded; so is a severity ("High") in a
+# column headed Severity / Risk / Rating. The credit team asked for the negatives to be
+# ANALYSED, not told: colour carries the weight so the prose does not have to shout.
+_SIGNAL = {"GREEN": ("C6EFCE", "006100"), "AMBER": ("FFEB9C", "7F5200"),
+           "RED": ("FFC7CE", "9C0006")}
+_SEVERITY = {"high": "RED", "critical": "RED", "moderate": "AMBER", "medium": "AMBER",
+             "low": "GREEN"}
+_SIGNAL_CELL = re.compile(r"^\s*(GREEN|AMBER|RED)\b")
+_SEVERITY_HEAD = re.compile(r"severity|risk|rating|signal|grade", re.I)
+
+
+def _signal(cell: str, heading: str) -> tuple[str, str] | None:
+    plain = _plain(cell)
+    m = _SIGNAL_CELL.match(plain)
+    if m:
+        return _SIGNAL[m.group(1)]
+    word = re.match(r"\s*([A-Za-z]+)", plain)
+    if word and _SEVERITY_HEAD.search(heading):
+        key = _SEVERITY.get(word.group(1).lower())
+        if key and len(plain.split()) <= 4:
+            return _SIGNAL[key]
+    return None
+
+
 def _cam_table(rows: list[list[str]], header: bool) -> str:
     """The EVAM CAM table (master prompt C4): full width, sized columns, 9 pt text on
     tight spacing, navy header band repeated on every page, zebra rows that never split
-    across a page, figures right-aligned."""
+    across a page, figures right-aligned, signals (GREEN / AMBER / RED) shaded."""
     widths = _col_widths(rows)
+    heads = [_plain(c) for c in rows[0]] if header and rows else []
     xml = ['<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblLayout w:type="fixed"/>'
            + _TBL_BORDER
            + '<w:tblCellMar><w:top w:w="30" w:type="dxa"/><w:left w:w="70" w:type="dxa"/>'
@@ -233,6 +259,9 @@ def _cam_table(rows: list[list[str]], header: bool) -> str:
                 shade = f'<w:shd w:val="clear" w:fill="{_CAM_HEAD}"/>'
                 para = _p(cell, bold=True, color='FFFFFF', size=_CAM_CELL, tight=True,
                           align='right' if numeric else None)
+            elif (sig := _signal(cell, heads[c] if c < len(heads) else "")) is not None:
+                shade = f'<w:shd w:val="clear" w:fill="{sig[0]}"/>'
+                para = _p(cell, size=_CAM_CELL, tight=True, bold=True, color=sig[1])
             else:
                 shade = (f'<w:shd w:val="clear" w:fill="{_CAM_ZEBRA}"/>'
                          if body_row % 2 == 1 else '')
@@ -253,11 +282,16 @@ def _table(rows: list[list[str]], header: bool, *, letterhead: bool = False,
            '<w:tblW w:w="0" w:type="auto"/>' + _TBL_BORDER
            + '<w:tblCellMar><w:left w:w="80" w:type="dxa"/><w:right w:w="80" w:type="dxa"/></w:tblCellMar>'
            '</w:tblPr>']
+    heads = [_plain(c) for c in rows[0]] if header and rows else []
     for r, cells in enumerate(rows):
         is_head = header and r == 0
         xml.append('<w:tr>')
         for c, cell in enumerate(cells):
-            if is_head and letterhead:
+            sig = None if is_head else _signal(cell, heads[c] if c < len(heads) else "")
+            if sig is not None:
+                shade = f'<w:shd w:val="clear" w:fill="{sig[0]}"/>'
+                para = _p(cell, bold=True, color=sig[1])
+            elif is_head and letterhead:
                 shade = f'<w:shd w:val="clear" w:fill="{accent}"/>'
                 para = _p(cell, bold=True, color='FFFFFF')
             elif is_head:

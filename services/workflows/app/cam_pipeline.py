@@ -33,13 +33,22 @@ import hashlib
 import re
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import Any
 
 from app.cam_ratios import FIGURES_TASK, compute, parse_figures, plausibility, ratios_markdown, trace
+from app import cam_facts, cam_findings
 from app.cam_telemetry import stage
+from app.statement_math import (
+    Arithmetic,
+    asset_claims,
+    misread_claims,
+    networth_notes,
+    statement_notes,
+    tnw_misreads,
+)
 
 # ----------------------------------------------------------------------------- prompt
 _BLOCK = re.compile(r"^BLOCK\s+([A-Z])\b")
@@ -519,14 +528,27 @@ DOC_TYPES = ("financial statements", "income tax return", "CMA / projections",
              "bank statement", "bank statement analysis", "GST return", "term sheet",
              "sanction letter", "debt profile", "credit bureau report", "KYC",
              "net worth statement", "legal / litigation report", "company profile",
-             "order / PO", "debtor / creditor ageing", "constitution / registration", "other")
+             "management profile", "call memo / meeting notes", "order / PO",
+             "debtor / creditor ageing", "constitution / registration", "other")
 _TYPE_LINE = re.compile(r"DOCUMENT TYPE:\s*\**\s*([^\n*|]+)", re.I)
 _FIN = {"financial statements", "income tax return", "CMA / projections",
         "debtor / creditor ageing", "debt profile"}
 _BANK = {"bank statement", "bank statement analysis", "GST return", "income tax return"}
 _PEOPLE = {"KYC", "credit bureau report", "net worth statement", "constitution / registration",
-           "company profile"}
-_BUSINESS = {"company profile", "order / PO", "debtor / creditor ageing", "CMA / projections"}
+           "company profile", "management profile", "call memo / meeting notes"}
+# A promoters' / team profile, CVs or bios — known by its name when its fact sheet says
+# "other": "management data missing although the PDF exists" was a profile the
+# Management section was never given.
+_MGMT_NAME = re.compile(r"promoter|management|founder|\bteam\b|\bcvs?\b|resume|bio[- ]?data"
+                        r"|\bbios?\b|director'?s?\s+profile|profile\s+of\s+(?:the\s+)?"
+                        r"(?:promoters?|directors?|partners?)", re.I)
+# A call memo, meeting minutes or a transcript: the desk's own conversation with the
+# borrower — "data about the company from call memos, transcripts, decks" is one of the
+# data points the credit team says a CAM cannot miss.
+_MEMO_NAME = re.compile(r"call\s*memo|call\s*notes|meeting|minutes|\bmom\b|transcript"
+                        r"|visit\s*(?:report|note)|reference\s*(?:note|check)", re.I)
+_BUSINESS = {"company profile", "order / PO", "debtor / creditor ageing", "CMA / projections",
+             "call memo / meeting notes"}
 _TERMS = {"term sheet", "sanction letter", "debt profile"}
 _LEGAL = {"legal / litigation report", "credit bureau report", "constitution / registration",
           "KYC", "income tax return"}
@@ -551,6 +573,11 @@ def doc_type(sheet: str, name: str = "") -> str:
     for t in sorted(DOC_TYPES, key=len, reverse=True):     # "bank statement analysis" first
         if t != "other" and said and (said == t.casefold() or said.startswith(t.casefold())):
             return t
+    # A meeting WITH the promoters is a meeting note, not their profile.
+    if _MEMO_NAME.search(name):
+        return "call memo / meeting notes"
+    if _MGMT_NAME.search(name):
+        return "management profile"
     if re.search(r"company profile|pitch|brochure", name, re.I):
         return "company profile"
     return "other"
@@ -576,6 +603,72 @@ def fit_for(sheets: list[tuple[str, str]], budget: int, want: set[str]) -> list[
     return mine_fit + rest_fit
 
 
+# Words that say nothing about which document a sub-section needs.
+_COMMON = frozenset("""about above across after against analysis assessment based being
+between borrower business company could credit detail details discussion document documents
+during facility facilities first from have into level over part position profile report
+section should since some their them there these this those through under what when where
+which while with within would year years""".split())
+
+
+def fit_relevant(sheets: list[tuple[str, str]], budget: int, want: set[str],
+                 about: str) -> list[str]:
+    """The fact sheets ONE sub-section reads: every sheet of its part's own kinds (up to
+    60% of ``budget``, the longest clipped first so none is dropped), then the other
+    sheets that name what the sub-section covers, most specific first, whole until the
+    budget is spent (the last one clipped). A sheet with nothing to do with it is left
+    out, so a 300-word sub-section is not sent every document on file.
+
+    WHY. On a 68-document file every v2 sub-section and every repair carried the part's
+    whole context, ~100k tokens each: 13.3M input tokens to write one CAM (Oct 2026). The
+    figures it may quote (the locked dataset, the ledger, the findings, the tables) still
+    reach it whole; the outline call, which plans the part, still reads everything.
+    Taking own-kind sheets whole until the budget ran out lost some entirely: the banking
+    sub-section of Pulze's next draft never saw the BOI statement and wrote the CC's
+    quarterly flows "not on record". A word is weighed by how few sheets carry it, so a
+    name ("TAFE") outranks a word every sheet shares; a bank's acronym ("BOI") counts.
+
+    Shortening every own sheet alike lost it again: a dozen bank-type sheets cut to ~2k
+    characters each, and the BOI analysis's month-wise table went with the tail. So each
+    own sheet keeps a short floor (none vanishes), and the most relevant are then given
+    back whole while the 60% lasts."""
+    words = {w for w in re.findall(r"[a-z]{4,}", about.lower()) if w not in _COMMON}
+    words |= {w.lower() for w in re.findall(r"\b[A-Z]{3}\b", about)}
+    lows = [sheet.lower() for _k, sheet in sheets]
+    weight = {w: 1 / n for w in words if (n := sum(1 for low in lows if w in low))}
+
+    def score(i: int) -> float:
+        return sum(wt for w, wt in weight.items() if w in lows[i])
+
+    order = sorted(range(len(sheets)), key=score, reverse=True)
+    mine = [sheets[i][1] for i in order if sheets[i][0] in want]
+    room = int(budget * 0.6)
+    own = fit(mine, room)
+    if own != mine:
+        floor = min(1500, room // max(len(mine), 1))
+        own = [s[:floor] for s in mine]
+        spare = room - sum(len(s) for s in own)
+        for n, s in enumerate(mine):                      # most relevant first
+            more = min(len(s) - len(own[n]), spare)
+            if more > 0:
+                own[n] = s[:len(own[n]) + more]
+                spare -= more
+        own = [o if len(o) == len(s) else o + "\n[… clipped to fit the context budget]"
+               for o, s in zip(own, mine)]
+    out = list(own)
+    left = budget - sum(len(s) for s in own)
+    for i in order:
+        if sheets[i][0] in want:
+            continue
+        if left < 2000 or score(i) == 0:
+            break
+        sheet = sheets[i][1]
+        out.append(sheet if len(sheet) <= left
+                   else sheet[:left] + "\n[… clipped to fit the context budget]")
+        left -= len(out[-1])
+    return out
+
+
 # ------------------------------------------------------------------------- prompts
 DIGEST_TASK = (
     "Produce the FACT SHEET for the document above — extraction only, no credit opinion. "
@@ -586,8 +679,15 @@ DIGEST_TASK = (
     "Management, ownership & group; Business (what it makes or sells, products, "
     "capacity, plants and locations, certifications, customers, suppliers, history, "
     "people — every specific the document gives); Legal, compliance & security; "
-    "Qualitative observations; Gaps & red flags (what a CAM would need that this document "
-    "lacks, internal inconsistencies). "
+    "Qualitative observations; Strengths & positive evidence (what this document shows in "
+    "the borrower's favour: clean conduct, figures that reconcile, contracts, "
+    "certifications, growth, security — as specifically as any concern); Gaps & red flags "
+    "(what a CAM would need that this document lacks, and inconsistencies the document's "
+    "OWN figures prove). A gap is something the document does not show, not a fault of "
+    "the borrower; never infer motive, distress or intent. "
+    "A management, promoter or team profile: every person with their role, age, "
+    "education, experience, prior employers and responsibilities, as the document gives "
+    "them. "
     "A bank statement or bank-statement analysis: give a MONTH-WISE table (Month | "
     "Credits | Debits | Closing / average / lowest balance | Inward and outward returns) "
     "with the account, bank, limit and period, then overdrawings or limit breaches, "
@@ -597,6 +697,11 @@ DIGEST_TASK = (
     "taxable turnover and tax paid, with filing dates and delays. Financial statements: "
     "every P&L and balance-sheet line as the statement prints it (do not merge lines, keep "
     "current and non-current apart, keep term loans and working-capital borrowings apart). "
+    "Accounting software prints GROUP totals with the ledger lines that make them up "
+    "beneath (\"Loans (Liability)\" then its OD, secured and unsecured lines): give each "
+    "group with its lines under it — one item, never a duplicate, a double count or an "
+    "unexplained line. A PRISM ARITHMETIC block beside the document is exact: follow it, "
+    "and never call a statement it shows tying unbalanced. "
     "Copy every figure exactly as stated, with its unit and period, and tag it [source: "
     "<document name>, page N]. Never compute, estimate or infer a figure that is not "
     "written in the document.")
@@ -620,6 +725,14 @@ DATASET_TASK = (
     "a subtotal (total current liabilities is not total outside liabilities; a term loan "
     "is not working-capital debt). PRISM ledger summaries in the fact sheets are exact "
     "sums of the rows — prefer them for bank credits and debits. "
+    "PRISM ARITHMETIC blocks are exact: a group total and its lines are ONE item (take the "
+    "group total — e.g. all sales lines, domestic and export, are the year's sales), and a "
+    "statement they show tying does tie — never report it as unbalanced or double-counted. "
+    "Compare debt like for like: a year-end balance against a later bureau or debt-profile "
+    "figure is not 'understated' — reconcile them lender by lender, naming the dates and "
+    "the loans taken in between. "
+    "A projected period takes every figure the CMA / projections give, its projected "
+    "balance sheet included — 'not on record' only where they are silent. "
     "Output Markdown, headed '## Financial dataset workpaper'.")
 
 # The IRG's dataset when no CAM dataset is cached: the statements, the locked figures and
@@ -632,7 +745,9 @@ LIGHT_DATASET_TASK = (
     "source-tagged; (2) a short debt table (lender, facility, sanctioned, outstanding); (3) "
     "where documents disagree on a figure, both values and the one you adopt, in one line "
     "each. No stress tests, base case, debtor map or narrative. Mark any figure you could "
-    "not source 'not on record'. Output Markdown, headed '## Financial dataset workpaper'.")
+    "not source 'not on record'. PRISM ARITHMETIC blocks are exact: a group total and its "
+    "lines are one item, and a statement they show tying does tie. Output Markdown, "
+    "headed '## Financial dataset workpaper'.")
 
 CHECKS_TASK = (
     "From the public-information phase above, list every public check the prompt requires "
@@ -664,13 +779,21 @@ RATIOS_RULE = (
     "'Computed ratios' table in the locked dataset — never compute one yourself; if a "
     "ratio you need is 'not computable' or absent, say so and name the missing input.")
 
-# The credit team's review of the first real CAM (Pulze, Oct 2026): a tag on every data
-# point cluttered it; terms were paraphrased and extended; annexures restated the body.
+# The credit team's reviews of the first real CAMs (Oct 2026): a tag on every data point
+# cluttered it, and then "maintain a neutral tone and remain factual, without quoting
+# sources" — the trail lives in the workpaper and the Machine QA, not in the memo.
 CITATION_RULE = (
-    " Cite sparingly: tag only the key figures and findings a reviewer would check (a "
-    "bureau score, a limit breach, a covenant, a figure that conflicts between documents) "
-    "as [source: <document>, page N] — at most one tag per paragraph, none in table cells. "
-    "Never put a 'Source' column in a table.")
+    " Do not quote sources: no [source: …] tags, no 'Source:' lines, no 'Source' column, "
+    "and no 'per the <document> on record' asides — state each fact plainly.")
+# Nor PRISM's machinery: the review marked "A3.6 revenue stress", "per Rule 9", "Tracxn
+# is not configured", "Honest assessment:" and "The recommendation in Section 8 must…".
+PLAIN_RULE = (
+    " Write for the credit committee, not about the drafting: never name the prompt's rule "
+    "codes (A3.x, Rule N, Phase A/B/C), PRISM, its tools or their configuration, the "
+    "'locked dataset' or 'fact sheets' — use the business term (interest coverage, the "
+    "base case, the revenue stress test). No notes to the reader about how the memo is "
+    "written or must be read ('Honest assessment:', 'the committee should be told "
+    "plainly', 'the recommendation must be defensible…').")
 EXEMPLAR_RULE = (
     " The prompt's examples and exemplar sentences set tone and depth only: never reuse "
     "their figures, amounts, company names or places.")
@@ -692,10 +815,64 @@ ANNEX_RULE = (
     "no notes paragraphs. Sub-sections that cannot apply to this borrower's constitution "
     "(e.g. shareholding or DINs for a partnership) are not written — name them once in one "
     "line.")
+# The credit team's second review (Oct 2026): a real CAM read "as if nothing is good".
+# Every document was mined for red flags and none for strengths; the same four worries
+# were re-argued in nearly every section; six of nine risks were High for a CMR-3 file at
+# 0 DPD; checks PRISM cannot run read as the borrower's failings; and a March balance was
+# called "understated" against a July bureau total. These rules are the counterweight.
+BALANCE_RULE = (
+    " Write as a balanced credit analyst, not a prosecutor: state the evidence in the "
+    "borrower's favour with the same weight and specificity as the risks, and let the "
+    "conclusion follow from both. Argue each concern ONCE, in the section that owns it "
+    "(financial statements → financial analysis; banking conduct and limit use → bank "
+    "statements; charge, collateral and lender consents → security; buyer concentration → "
+    "order book; promoters' bureau and KYC → management); elsewhere give it one clause and "
+    "point to that section — the summary and recommendation summarise, they do not "
+    "re-argue. Rate a risk High only when the documents show a direct path to loss on THIS "
+    "facility. A document not yet supplied is an item to obtain, stated once and neutrally, "
+    "not a risk; a check PRISM cannot run (registries, courts, MCA, ratings, peers) belongs "
+    "in the public-checks log, never in the risk narrative or as a weakness of the "
+    "borrower. State what the documents show: never infer motive, distress or intent, and "
+    "never treat age by itself as a risk. Compare like for like — the same date and scope "
+    "(a year-end balance is not 'understated' by a later bureau total; name the dates and "
+    "the loans taken in between). Be analytical and observational: lead with the business "
+    "— what the company does, for whom, how it wins, where its exposure lies — and use "
+    "the numbers as evidence for that picture, not as the story; observe trends and "
+    "explain them rather than auditing figures line by line (the tables carry them). Do "
+    "not speculate beyond the documents ('would widen sharply', 'suggests the strain is "
+    "being absorbed personally').")
+# "There is a difference between telling negatively and analysing the negative part"
+# (the credit team): a concern is analysed in four beats, and colour — shaded in the Word
+# CAM by docx_out — carries the weight so the prose does not have to.
+ANALYSE_RULE = (
+    " Analyse a concern, do not accuse: give it in four beats — what the evidence shows; "
+    "why it matters for THIS facility (how it would reach repayment); what on record "
+    "offsets it; what would resolve it (the document, condition or covenant). 'Mitigant: "
+    "none' is never the answer — give what offsets it, or the condition that would. Where a "
+    "table weighs factors (risks, strengths, conduct, bureau, security), give it a "
+    "'Signal' column of exactly GREEN (supports the credit), AMBER (to watch or to resolve) "
+    "or RED (a direct, unmitigated path to loss on this facility), then a few words; PRISM "
+    "shades these cells. Use the colours honestly — GREEN where the evidence is good is as "
+    "much a finding as RED.")
+GLANCE_RULE = (
+    " Open with '### Credit picture at a glance': one table (Factor | Signal | What the "
+    "evidence shows) of the 6–10 factors that decide this credit — strengths and concerns "
+    "together, each one line, each Signal GREEN, AMBER or RED as defined above.")
+# v2: the picture is PRISM's, rendered from the credit rubric's findings.
+GLANCE_TOKEN_RULE = (
+    " Open with '### Credit picture at a glance' and, on the next line alone, the token "
+    "{{table:picture}} — PRISM renders that table from the credit team's rubric; do not "
+    "write one of your own. Then summarise the credit from it.")
+_GLANCE_PART = re.compile(r"EXECUTIVE SUMMARY", re.I)
+STATEMENT_RULE = (
+    " PRISM ARITHMETIC blocks are exact: a group total and its lines are one item (never a "
+    "duplicate, a double count or an unexplained line), and a statement they show tying "
+    "does tie.")
 _TERMS_PART = re.compile(r"PROPOSAL SUMMARY|SECURITY|RECOMMENDATION|APPENDIX|EXECUTIVE", re.I)
 
 
-def section_task(spec: SectionSpec, computed: bool = False, *, terms: bool = False) -> str:
+def section_task(spec: SectionSpec, computed: bool = False, *, terms: bool = False,
+                 glance_token: bool = False) -> str:
     appendix = terms and spec.heading.upper().startswith("APPENDIX")
     return (f"Write ONLY this part of the CAM: {spec.title}\n\nIts specification:\n"
             + (APPENDIX_TASK if appendix else spec.spec)
@@ -703,7 +880,11 @@ def section_task(spec: SectionSpec, computed: bool = False, *, terms: bool = Fal
             "Markdown tables with a header row. Quote figures from the LOCKED financial "
             "dataset exactly — never recompute or alter them."
             + (RATIOS_RULE if computed else "")
-            + CITATION_RULE + EXEMPLAR_RULE
+            + CITATION_RULE + PLAIN_RULE + EXEMPLAR_RULE
+            + ("" if appendix or spec.heading.upper().startswith("ANNEXURE")
+               else BALANCE_RULE + ANALYSE_RULE + STATEMENT_RULE)
+            + ((GLANCE_TOKEN_RULE if glance_token else GLANCE_RULE)
+               if _GLANCE_PART.search(spec.heading) else "")
             + (TERMS_RULE if terms and _TERMS_PART.search(spec.heading) else "")
             + (ANNEX_RULE if spec.heading.upper().startswith("ANNEXURE") else "")
             + " Where the documents are silent, say 'not on record'. Do not write any "
@@ -718,16 +899,221 @@ REPAIR_TASK = (
     "figure, or a share or difference whose inputs the sentence shows, may stay). A "
     "document called missing or empty that IS on record: use its fact sheet above — if "
     "the claim is about a period or item that document truly lacks, say exactly what it "
-    "does cover. Change nothing else. Return the whole part, heading included.\n\n"
+    "does cover. Internal code or tool talk: say it in the business's words, or drop "
+    "it. A statement misread: its PRISM ARITHMETIC block is exact — correct the "
+    "claim to what the arithmetic shows (a group total and its lines are one item; a "
+    "statement shown tying does tie), and drop any conclusion that rested on it; a "
+    "net-worth form PRISM READ declares assets — state them as declared. "
+    "Change nothing else. Return the whole part, heading included.\n\n"
     "===== YOUR DRAFT =====\n{draft}")
 DATASET_FIX_TASK = (
     "PRISM checked the locked figures of the workpaper below and found these breaks of "
-    "balance-sheet identities or plausibility: {flags}. Each is almost always a mis-read "
-    "line (a subtotal taken for a total, a figure copied into the wrong line, a unit slip). "
+    "balance-sheet identities or plausibility, or of the statements' own arithmetic: "
+    "{flags}. Each is almost always a mis-read "
+    "line (a subtotal taken for a total, a group total counted beside its own lines, a "
+    "figure copied into the wrong line, a unit slip). "
     "Re-read the fact sheets above, correct the workpaper's tables and the locked-figures "
     "block, and return the WHOLE corrected workpaper ending with the block. Where the "
     "source really states a figure that breaks a check, keep it and say why in the "
     "triangulation notes.\n\n===== THE WORKPAPER =====\n{workpaper}")
+
+
+# ------------------------------------------------------------------ v2 writing
+# A weaker engine writes a better 300-word sub-section than a 1,800-word part: the part is
+# planned first, then written a sub-section at a time — each told what the others cover,
+# so a concern is argued once — then reviewed and repaired where it failed.
+OUTLINE_TASK = (
+    "PLAN (do not write) this part of the CAM: {title}\n\nIts specification:\n{spec}\n\n"
+    "Findings this part owns (each must be explained in exactly one sub-section): {owned}\n"
+    "Tables PRISM renders (assign each one this part needs to one sub-section): {tokens}\n\n"
+    "Return JSON only, no prose: {{\"subsections\": [{{\"heading\": \"...\", \"covers\": "
+    "\"what this sub-section says, one line\", \"findings\": [\"finding ids\"], \"table\": "
+    "\"a table name from the list, or null\"}}]}} — 2 to 7 sub-sections, in the order the "
+    "specification gives, together covering all of it.")
+SUB_TASK = (
+    "Write ONLY the sub-section '### {heading}' of the CAM part '{title}'. It covers: "
+    "{covers}.\nThe part's other sub-sections — leave their ground to them: {others}.\n"
+    "{findings}{table}About {words} words of prose (tables extra). Start with the line "
+    "'### {heading}' and write nothing outside this sub-section; the part's rules above "
+    "apply to it (ignore their instruction about the part's own '##' heading).")
+# The credit team's review sheet and highlights, as the reviewer's standards.
+REVIEW_STANDARDS = (
+    "1. Neutral, factual tone; analytical and observational, not critical; led by the "
+    "business and its exposure, with numbers as evidence.\n"
+    "2. Each concern in four beats — what the evidence shows, why it matters for this "
+    "facility, what offsets it, what resolves it; never 'Mitigant: none'.\n"
+    "3. No speculation beyond the documents; no motive, distress or intent inferred; age "
+    "is not a risk by itself.\n"
+    "4. A concern is argued in the part that owns it; elsewhere one clause.\n"
+    "5. Strengths stated as specifically as risks.\n"
+    "6. No sources quoted, no rule codes, no PRISM or tool talk, no notes to the reader.\n"
+    "7. Data the documents and the PRISM ledger give is used, not called 'not on record'.\n"
+    "8. Signals exactly as PRISM FINDINGS gives them — never re-graded.")
+CRITIC_TASK = (
+    "You are the credit committee's reviewer. Review the CAM part '{title}' below against "
+    "these standards ONLY:\n{standards}\n\n===== PRISM FINDINGS =====\n{findings}\n\n"
+    "{ledger}\n\n===== THE PART =====\n{part}\n\nReturn JSON only: {{\"issues\": "
+    "[{{\"subsection\": \"its ### heading\", \"problem\": \"one line\", \"fix\": \"one "
+    "line\"}}]}} — at most 6, the most important first; an empty list if the part meets "
+    "the standards. No style preferences.")
+REPAIR_SUB_TASK = (
+    "Your sub-section below was reviewed. Fix each point:\n{issues}\nChange nothing else; "
+    "keep every figure exactly as the sources give it. Return the whole sub-section, "
+    "starting with its '###' heading.\n\n===== YOUR SUB-SECTION =====\n{text}")
+
+
+def _json_obj(raw: str) -> dict[str, Any] | None:
+    import json
+
+    m = re.search(r"\{.*\}", raw or "", re.S)
+    if not m:
+        return None
+    try:
+        got = json.loads(m.group(0))
+    except ValueError:
+        return None
+    return got if isinstance(got, dict) else None
+
+
+def parse_outline(raw: str, owned: list[str], tables: list[str]) -> list[dict[str, Any]] | None:
+    """The plan, cleaned: 2–7 sub-sections with headings; every owned finding assigned
+    once (an unassigned one joins the last sub-section); only tables PRISM has. None when
+    the plan cannot be read — the part is then written in one call."""
+    got = _json_obj(raw)
+    items = (got or {}).get("subsections")
+    if not isinstance(items, list):
+        return None
+    plan: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for it in items[:7]:
+        if not isinstance(it, dict):
+            continue
+        heading = re.sub(r"^#+\s*", "", str(it.get("heading") or "")).strip()
+        if not heading:
+            continue
+        fids = [str(x) for x in (it.get("findings") or []) if str(x) in owned and str(x) not in seen]
+        seen.update(fids)
+        table = str(it.get("table") or "").strip().lower() or None
+        plan.append({"heading": heading[:120], "covers": str(it.get("covers") or heading)[:300],
+                     "findings": fids, "table": table if table in tables else None})
+    if len(plan) < 2:
+        return None
+    plan[-1]["findings"] += [f for f in owned if f not in seen]
+    return plan
+
+
+def parse_issues(raw: str) -> list[dict[str, str]]:
+    got = _json_obj(raw)
+    out = []
+    for it in ((got or {}).get("issues") or [])[:6]:
+        if isinstance(it, dict) and it.get("problem"):
+            out.append({"subsection": str(it.get("subsection") or ""),
+                        "problem": str(it["problem"])[:300], "fix": str(it.get("fix") or "")[:300]})
+    return out
+
+
+_RECOMMENDED = re.compile(r"\brecommend\w*\b[^.\n]{0,80}?(?:Rs\.?|INR|₹)\s*([\d,]+(?:\.\d+)?)\s*"
+                         r"(lakhs?|crores?|cr)\b", re.I)
+
+
+def recommended(text: str) -> list[tuple[str, float]]:
+    """Every amount a sentence recommends, (as written, in lakh)."""
+    out = []
+    for m in _RECOMMENDED.finditer(text or ""):
+        try:
+            v = float(m.group(1).replace(",", ""))
+        except ValueError:
+            continue
+        out.append((f"Rs. {m.group(1)} {m.group(2)}",
+                    v * 100 if m.group(2).lower().startswith("cr") else v))
+    return out
+
+
+def over_cap(text: str, cap: float | None) -> list[str]:
+    """Amounts a sentence recommends that are above the facility cap ("recommend a limit
+    of Rs. 200 lakh" against "up to Rs. 100 lakh")."""
+    return [said for said, lakh in recommended(text) if cap and lakh > cap * 1.001]
+
+
+def off_amount(text: str, decided: float | None) -> list[str]:
+    """Amounts recommended other than the one the Recommendation names: Pulze's third
+    draft called the credit "fundable at Rs 60 lakh or below" and recommended up to 100."""
+    return [said for said, lakh in recommended(text)
+            if decided is not None and abs(lakh - decided) > 0.5]
+
+
+_PAN = re.compile(r"\b[A-Z]{5}\d{4}[A-Z]\b")
+_MARKET = re.compile(r"[^.\n]*\b(?:market|industry|demand|sector)\b[^.\n]*?(\d+(?:\.\d+)?)\s*%"
+                     r"[^.\n]*(?:CAGR|a year|annually|per annum|growth|grow)[^.\n]*", re.I)
+
+
+def unsupported(text: str, sources: str) -> list[str]:
+    """Identifiers and market figures the documents do not carry: a PAN mistyped in one
+    place ("KWOPS2099A"), an industry growth rate with no source although the file has no
+    industry research."""
+    out = [f"PAN {p} is in no document" for p in sorted(set(_PAN.findall(text or "")))
+           if p not in sources]
+    out += [f"market figure with no source: '{m.group(0).strip()[:140]}'"
+            for m in _MARKET.finditer(text or "") if f"{m.group(1)}%" not in sources
+            and f"{m.group(1)} %" not in sources]
+    return out
+
+
+_AUDITED_FOR = re.compile(r"audited[^.\n]{0,60}?(FY\s*'?(?:20)?\d{2}(?:\s*[-–/]\s*(?:20)?\d{2})?)",
+                          re.I)
+_CONSENT_LATER = re.compile(r"[^.\n]*\b(?:consent|NOC|no[- ]objection)\b[^.\n]*(?:within\s+\d+\s+days"
+                            r"\s+(?:of|after|from|post)[^.\n]{0,20}disburs|post[- ]disbursement)"
+                            r"[^.\n]*", re.I)
+
+
+def condition_faults(text: str, projected: set[str]) -> list[str]:
+    """Conditions that cannot be met or that undo the structure: audited accounts asked
+    for a year that has not ended (Pulze's third draft asked for FY 2026-27 audited
+    statements; FY26 was the provisional year), and the existing banker's consent allowed
+    after disbursement — without it the pari passu charge does not exist."""
+    from app.cam_facts import statement_period
+
+    out = []
+    for m in _AUDITED_FOR.finditer(text or ""):
+        year = statement_period(m.group(1))
+        if year and year in projected:
+            out.append(f"asks for audited accounts for {m.group(1)}, a year not yet ended")
+    out += [f"lets the existing banker's consent follow disbursement: "
+            f"'{m.group(0).strip()[:140]}' — it is a condition before the first disbursement"
+            for m in _CONSENT_LATER.finditer(text or "")]
+    return out
+
+
+def clean_sub(heading: str, text: str) -> str:
+    """A sub-section as written, under its own heading: a part heading the model added is
+    dropped, a missing '###' heading is restored."""
+    lines = [ln for ln in (text or "").strip().splitlines() if not re.match(r"^#{1,2}\s", ln)]
+    body = "\n".join(lines).strip()
+    if not body.startswith("###"):
+        body = f"### {heading}\n\n{body}"
+    return body
+
+
+_SHINGLE = 9
+
+
+def repeated_passages(draft_md: str) -> list[str]:
+    """Pairs of parts that share whole passages (nine-word runs, tables left out) — a
+    concern argued twice instead of once with a pointer."""
+    parts = []
+    for head, body in _blocks(draft_md):
+        words = re.findall(r"[a-z0-9]+", "\n".join(
+            ln for ln in body.splitlines() if not ln.lstrip().startswith(("|", "#"))).casefold())
+        parts.append((head.split(":")[0], {" ".join(words[i:i + _SHINGLE])
+                                           for i in range(len(words) - _SHINGLE + 1)}))
+    out = []
+    for i in range(len(parts)):
+        for j in range(i + 1, len(parts)):
+            shared = parts[i][1] & parts[j][1]
+            if len(shared) >= 3:
+                out.append(f"{parts[i][0]} & {parts[j][0]} ({len(shared)} shared runs, e.g. "
+                           f"'…{sorted(shared)[0]}…')")
+    return out
 
 
 # ----------------------------------------------------------------------- machine QA
@@ -779,13 +1165,67 @@ def _same(a: str, b: str) -> bool:
     return norm(a) == norm(b)
 
 
+# The credit team's "data points that can't be missed, where documents are provided",
+# in their words, with the kinds of document that carry each.
+MUST_USE: dict[str, set[str]] = {
+    "Constitutional documents": {"constitution / registration"},
+    "Financials": {"financial statements", "CMA / projections"},
+    "Decks and reference documents": {"company profile", "management profile",
+                                      "call memo / meeting notes"},
+    "Bank statements, GST and ITR": {"bank statement", "bank statement analysis",
+                                     "GST return", "income tax return"},
+    "Term sheet / IP approval": {"term sheet"},
+    "Order book, pipeline and business metrics": {"order / PO", "debtor / creditor ageing"},
+    "Banking limits and outstanding": {"sanction letter", "debt profile",
+                                       "credit bureau report"},
+}
+_WORD = re.compile(r"[A-Za-z][A-Za-z/&.-]{4,}")
+
+
+def _significant(raw: str) -> bool:
+    digits = re.sub(r"\D", "", raw).lstrip("0")
+    return len(digits) >= 3 and not re.fullmatch(r"(19|20)\d\d", raw)
+
+
+def unused_documents(docs: list[SourceDoc], sheets: dict[str, str], kinds: dict[str, str],
+                     draft_md: str) -> dict[str, list[str]]:
+    """{data point: [documents]} — supplied documents of a must-use kind whose data never
+    reached the CAM: none of their significant figures, and fewer than three of the words
+    only they hold, appear in the draft. A document named here was read but not used."""
+    words_of = {d.doc_id: {w.casefold() for w in _WORD.findall(sheets.get(d.doc_id, ""))}
+                for d in docs}
+    draft_words = {w.casefold() for w in _WORD.findall(draft_md)}
+    draft_nums = [m.group(0) for m in _NUM.finditer(draft_md) if _significant(m.group(0))]
+    out: dict[str, list[str]] = {}
+    for d in docs:
+        group = next((g for g, ks in MUST_USE.items() if kinds.get(d.doc_id) in ks), None)
+        sheet = sheets.get(d.doc_id, "")
+        if group is None or not sheet:
+            continue
+        idx = figure_index(" ".join(m.group(0) for m in _NUM.finditer(sheet)
+                                    if _significant(m.group(0))))
+        if any(_indexed(n, idx) for n in draft_nums):
+            continue
+        others = set().union(*(w for k, w in words_of.items() if k != d.doc_id))
+        if len((words_of[d.doc_id] - others) & draft_words) >= 3:
+            continue
+        out.setdefault(group, []).append(d.name)
+    return out
+
+
 def machine_qa(prompt: MasterPrompt, draft_md: str, workpaper_md: str, *,
+               amounts: list[float] | None = None,
                ratios_from_code: bool | None = None, ratios_note: str | None = None,
                implausible: list[str] | None = None, untraced: list[str] | None = None,
                traced_off: dict[str, list[str]] | None = None,
                terms_off: list[str] | None = None,
                missing_claims: dict[str, list[str]] | None = None,
-               term_sheet: bool | None = None) -> dict[str, Any]:
+               term_sheet: bool | None = None,
+               misreads: dict[str, list[str]] | None = None,
+               jargon: dict[str, list[str]] | None = None,
+               unused: dict[str, list[str]] | None = None,
+               tables: dict[str, list[str]] | None = None,
+               conflicts: list[str] | None = None) -> dict[str, Any]:
     """The master prompt's Step 7, the part a program can check — before an analyst
     reads the draft. Every check is named with what it found; a failure is reported,
     never silently fixed, so the analyst knows exactly what to look at.
@@ -901,9 +1341,67 @@ def machine_qa(prompt: MasterPrompt, draft_md: str, workpaper_md: str, *,
                        "detail": "no term sheet among the documents — the terms come from "
                        "the Register and the analyst's notes; attach the term sheet"})
 
+    if misreads is not None:
+        said = [f"{h.split(':')[0]}: {v[0]}" for h, v in misreads.items() if v]
+        checks.append({"check": "Statements read as printed (PRISM's arithmetic)",
+                       "status": "fail" if said else "pass",
+                       "detail": "; ".join(said[:6]) if said else
+                       "no tied statement called unbalanced, no group called a duplicate"})
+
+    if jargon is not None:
+        said = [f"{h.split(':')[0]}: {v[0]}" for h, v in jargon.items() if v]
+        checks.append({"check": "Plain language (no rule codes or tool talk)",
+                       "status": "warn" if said else "pass",
+                       "detail": "; ".join(said[:6]) if said else "none"})
+    if unused is not None:
+        said = [f"{group}: {', '.join(v[:4])}" + (" …" if len(v) > 4 else "")
+                for group, v in unused.items() if v]
+        checks.append({"check": "Supplied data used (the data points that can't be missed)",
+                       "status": "warn" if said else "pass",
+                       "detail": ("no figure from these documents is in the CAM — "
+                                  + "; ".join(said)) if said else "every supplied data "
+                       "document contributes to the CAM"})
+
+    if amounts is not None:
+        checks.append({"check": "One recommended amount",
+                       "status": "fail" if len(amounts) > 1 else "pass",
+                       "detail": ("the CAM recommends " + ", ".join(f"Rs. {a:,.1f} lakh"
+                                                                   for a in amounts)
+                                  + " — state one") if len(amounts) > 1 else
+                       (f"Rs. {amounts[0]:,.1f} lakh throughout" if amounts else
+                        "no amount recommended in so many words")})
+    if tables is not None:
+        where = [f"{k} in {', '.join(h.split(':')[0] for h in hs)}" if hs else f"{k} not placed"
+                 for k, hs in tables.items()]
+        checks.append({"check": "Tables rendered by PRISM (v2 harness)",
+                       "status": "warn" if any(not hs for hs in tables.values()) else
+                       ("pass" if tables else "info"),
+                       "detail": "; ".join(where) or "no ledger tables for this file"})
+    if conflicts:
+        checks.append({"check": "Documents that disagree (fact ledger)", "status": "warn",
+                       "detail": "; ".join(conflicts[:8]) + " — reconcile before sanction"})
+
+    repeats = repeated_passages(draft_md)
+    checks.append({"check": "Each point made once (no passage repeated across parts)",
+                   "status": "warn" if repeats else "pass",
+                   "detail": "; ".join(repeats[:5]) if repeats else "none repeated"})
+
     gaps = len(re.findall(r"not on record", draft_md, re.I))
     checks.append({"check": "Facts marked 'not on record'", "status": "info",
                    "detail": f"{gaps} place(s) — the documents were silent there"})
+    # The balance a reader sees first: how the colours fall. All RED and no GREEN in a
+    # file with clean conduct is the "as if nothing is good" draft — worth a look.
+    cells = [c.strip(" *") for ln in draft_md.splitlines() if ln.lstrip().startswith("|")
+             for c in ln.split("|")]
+    signals = {s: sum(1 for c in cells if re.match(rf"{s}\b", c)) for s in ("GREEN", "AMBER", "RED")}
+    high = sum(1 for c in cells if re.fullmatch(r"(?i)high", c))
+    checks.append({"check": "Signals (the credit picture's colours)",
+                   "status": "warn" if signals["RED"] and not signals["GREEN"] else "info",
+                   "detail": (f"GREEN {signals['GREEN']} · AMBER {signals['AMBER']} · RED "
+                              f"{signals['RED']}; {high} risk(s) rated High"
+                              + (" — no GREEN at all: check that the strengths on record "
+                                 "were weighed" if signals["RED"] and not signals["GREEN"]
+                                 else ""))})
     return {"passed": not any(c["status"] == "fail" for c in checks), "checks": checks}
 
 
@@ -991,6 +1489,38 @@ def _source_line(docs: list[str]) -> str:
     docs = _uniq(docs)
     shown = "; ".join(docs[:6]) + (f"; and {len(docs) - 6} more" if len(docs) > 6 else "")
     return f"*Source: {shown}.*"
+
+
+_SOURCE_TAG = re.compile(r"\s*\[(?:sources?|ref)\s*:[^\[\]\n]*\]", re.I)
+_SOURCE_LINE = re.compile(r"^\s*[*_]{0,2}\s*sources?\s*:.*$", re.I)
+
+
+def strip_sources(md: str) -> str:
+    """The memo quotes no sources (the credit team's review): every [source: …] tag and
+    every 'Source:' line goes, in code — a writer told so still adds a few."""
+    out = []
+    for ln in md.splitlines():
+        if _SOURCE_LINE.match(ln) and not ln.lstrip().startswith("|"):
+            continue
+        out.append(_SOURCE_TAG.sub("", ln))
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip()
+
+
+# PRISM's machinery and the prompt's codes, which the committee should never read.
+_INTERNAL = re.compile(
+    r"\bA\d\.\d+\b|\bRule\s+\d+\b|\bPhase\s+[ABC]\b|\blocked\s+(?:financial\s+)?(?:dataset|"
+    r"figures|forensic)|\bfact\s+sheets?\b|\bPRISM\b|\bthis\s+deployment\b|\bnot\s+configured\b"
+    r"|\bHonest\s+assessment\b|\bcommittee\s+should\s+be\s+told\b|\bMachine\s+QA\b", re.I)
+
+
+def internal_terms(section_md: str) -> list[str]:
+    """Each distinct internal code or tool reference in a section, with a little context."""
+    out: list[str] = []
+    body = "\n".join(ln for ln in section_md.splitlines() if not ln.lstrip().startswith("#"))
+    for m in _INTERNAL.finditer(body):
+        ctx = body[max(0, m.start() - 30):m.end() + 30].replace("\n", " ").strip()
+        out.append(f"'{m.group(0)}' in '…{ctx}…'")
+    return _uniq(out)
 
 
 def tidy_citations(md: str, names: list[str]) -> str:
@@ -1122,7 +1652,7 @@ def compact_checks(table_md: str) -> str:
     if done:
         out += ["", head, rule, *done]
     if counts:
-        out += ["", "**Not performed by PRISM — for the analyst to complete:** "
+        out += ["", "**Not yet performed — for the analyst to complete:** "
                 + "; ".join(k + (f" ×{n}" if n > 1 else "") for k, n in counts.items()) + "."]
     return "\n".join(out).strip()
 
@@ -1209,6 +1739,10 @@ _KIND_WORDS: dict[str, str] = {
     "debt profile": r"debt profile|loan schedule",
     "CMA / projections": r"\bCMA\b|projections",
     "company profile": r"company profile|pitch deck",
+    "management profile": r"management (?:profiles?|bios?|team details)|promoters?'? "
+                          r"(?:profiles?|bios?|CVs?|background)|(?:CVs?|resumes?|bio[- ]?data)"
+                          r" of (?:the )?(?:promoters?|directors?|partners?|founders?)",
+    "call memo / meeting notes": r"call memos?|meeting (?:notes|minutes)|transcripts?",
     "KYC": r"\bKYC\b|\bPAN\b|aadhaa?r",
 }
 # A claim has a shape, not just two nearby words: the document IS absent ("the GST returns
@@ -1299,6 +1833,9 @@ class DraftResult:
     # What a caller's interlude returned (the IRG: the rubric's grade, computed between
     # the locked dataset and the sections so every section can explain it).
     extra: dict[str, Any] = field(default_factory=dict)
+    # v2: the credit picture's findings, and what the reviewer sent back, per part.
+    findings: list[dict[str, Any]] = field(default_factory=list)
+    reviews: list[dict[str, Any]] = field(default_factory=list)
 
 
 class DigestCache:
@@ -1366,6 +1903,7 @@ async def draft_staged(*, generate: Engine, system: str, prompt: MasterPrompt,
                        docs: list[SourceDoc], analyst_notes: str, cache: DigestCache,
                        model_id: str, progress: Progress, concurrency: int = 4,
                        call_budget: int = 360_000, digest_part_chars: int = 90_000,
+                       sub_sheet_chars: int = 60_000,
                        deal_context: str = "", public_context: str = "",
                        today: str = "", retry_delay_s: float = 0.0,
                        digest_effort: str | None = None,
@@ -1373,7 +1911,11 @@ async def draft_staged(*, generate: Engine, system: str, prompt: MasterPrompt,
                        interlude: Interlude | None = None,
                        section_effort: str | None = None,
                        final_effort: str | None = None,
-                       light_dataset: bool = False) -> DraftResult:
+                       repair_effort: str | None = None,
+                       light_dataset: bool = False, harness: str = "v1",
+                       critic: Engine | None = None, rubric_path: str = "",
+                       signal_overrides: dict[str, dict[str, str]] | None = None
+                       ) -> DraftResult:
     gate = asyncio.Semaphore(max(1, concurrency))
     result = DraftResult(draft_md="", workpaper_md="")
     base_system = f"{system}\n\n===== THE CREDIT TEAM'S RULES (Block A) =====\n{prompt.rules}"
@@ -1424,6 +1966,31 @@ async def draft_staged(*, generate: Engine, system: str, prompt: MasterPrompt,
     docs, skipped = select_documents(focused)
     result.notes += skipped
     names = [d.name for d in docs]
+    # The statements' own arithmetic, done by PRISM before any model reads them: which
+    # figures are groups of the lines beneath, and whether the totals tie (statement_math).
+    arith: dict[str, str] = {}
+    statements: list[Arithmetic] = []
+    declared: list[str] = []          # net-worth forms that declare assets
+
+    def read_by_code() -> cam_facts.Ledger | None:
+        for d in docs:
+            block, proof = statement_notes(d.text, d.name)
+            if proof is not None:
+                arith[d.doc_id] = block
+                statements.append(proof)
+            # A guarantor's assets & liabilities form: the values it declares, read by PRISM.
+            nw, has_assets = networth_notes(d.text, d.name)
+            if nw:
+                arith[d.doc_id] = "\n\n".join(b for b in (arith.get(d.doc_id), nw) if b)
+            if has_assets:
+                declared.append(d.name)
+        # v2: the documents whose layout is known, read by code into one ledger (cam_facts).
+        return cam_facts.build(docs, statements, bank_of) if harness == "v2" else None
+
+    # Pure CPU over every page of the file: in a thread, so a long document never holds
+    # the service's event loop (the workbench's progress polls timed out behind it).
+    ledger = await asyncio.to_thread(read_by_code)
+    ledger_block = ledger.render() if ledger is not None else ""
 
     # 1. DIGEST -------------------------------------------------------------------------
     jobs = [(d, i, part) for d in docs
@@ -1436,14 +2003,17 @@ async def draft_staged(*, generate: Engine, system: str, prompt: MasterPrompt,
         """(doc, part index, fact sheet or "", error or "")."""
         nonlocal done
         attached = repr(doc.blocks)[:4096] if doc.blocks else ""
+        proof = arith.get(doc.doc_id, "")
         key = cache.key(model_id, digest_effort or "", prompt.rules, phase_a, DIGEST_TASK, part,
-                        hashlib.sha256(attached.encode()).hexdigest() if attached else "")
+                        hashlib.sha256(attached.encode()).hexdigest() if attached else "",
+                        *([proof] if proof else []))
         sheet, err = cache.get(key) or "", ""
         if not sheet:
             label = doc.name + (f" (part {idx + 1})" if idx else "")
             ask = (f"===== DOCUMENT: {label} =====\n"
                    + (part or "(the document is the attached scan)") + "\n\n"
-                   f"===== EXTRACTION INSTRUCTIONS (Phase A) =====\n{phase_a}\n\n{DIGEST_TASK}")
+                   + (f"{proof}\n\n" if proof else "")
+                   + f"===== EXTRACTION INSTRUCTIONS (Phase A) =====\n{phase_a}\n\n{DIGEST_TASK}")
             content: Any = [*doc.blocks, {"type": "text", "text": ask}] if doc.blocks else ask
             try:
                 sheet = await call_retry(content, "digest", digest_effort)
@@ -1470,6 +2040,10 @@ async def draft_staged(*, generate: Engine, system: str, prompt: MasterPrompt,
             result.notes.append({"doc_id": doc.doc_id, "document": doc.name,
                                  "reason": f"fact sheet failed: {err}"})
     joined = {k: "\n\n".join(s for _i, s in sorted(v)) for k, v in sheets.items()}
+    # Every later reader (the dataset, each section) gets the proof beside the fact sheet.
+    for k, shown in arith.items():
+        if joined.get(k):
+            joined[k] = f"{joined[k]}\n\n{shown}"
     # Each fact sheet says what its document is: sections get their own documents whole.
     kinds = {d.doc_id: doc_type(joined.get(d.doc_id, ""), d.name) for d in docs}
     typed = [(kinds[d.doc_id], f"===== FACT SHEET: {d.name} =====\n" + joined[d.doc_id])
@@ -1489,17 +2063,22 @@ async def draft_staged(*, generate: Engine, system: str, prompt: MasterPrompt,
     public_block = (f"===== PUBLIC SOURCES PRISM HOLDS (cite as given; documents take "
                     f"precedence on the borrower's own figures) =====\n{public_context}"
                     if public_context.strip() else "")
-    notes_block = "\n\n".join(b for b in (deal_block, public_block, notes_block) if b)
+    notes_block = "\n\n".join(b for b in (deal_block, ledger_block, public_block, notes_block)
+                              if b)
     # Two documents are quoted, not summarised: the term sheet (the facility's terms of
     # record, transcribed into the appendix) and the company profile (the business, in
     # the borrower's own words — a fact sheet keeps too little of it for Sections 2 and 4).
     term_text = "\n\n".join(d.text for d in docs if kinds[d.doc_id] == "term sheet")[:40_000]
     term_block = (f"===== THE TERM SHEET (verbatim — the facility's terms of record) =====\n"
                   f"{term_text}" if term_text.strip() else "")
+    # A management / promoter profile, a deck and a call memo are quoted the same way: the
+    # people's experience and the borrower's own account of its business are exactly what
+    # a fact sheet compresses away.
     profile_text = "\n\n".join(d.text for d in docs
-                               if kinds[d.doc_id] == "company profile")[:60_000]
-    profile_block = (f"===== COMPANY PROFILE (full text, as supplied) =====\n{profile_text}"
-                     if profile_text.strip() else "")
+                               if kinds[d.doc_id] in ("company profile", "management profile",
+                                                      "call memo / meeting notes"))[:60_000]
+    profile_block = (f"===== COMPANY AND MANAGEMENT PROFILES, DECKS AND CALL NOTES (full text, "
+                     f"as supplied) =====\n{profile_text}" if profile_text.strip() else "")
 
     def primaries(heading: str) -> list[str]:
         out = []
@@ -1562,31 +2141,59 @@ async def draft_staged(*, generate: Engine, system: str, prompt: MasterPrompt,
     figures, dataset, why_not = parse_figures(dataset)
     implausible: list[str] = []
     untraced: list[str] = []
+
+    def misread(workpaper: str) -> list[str]:
+        return [f"statement misread: {m}" for m in misread_claims(workpaper, statements)]
+
+    misreads: dict[str, list[str]] = {}
+    jargon: dict[str, list[str]] = {}
     if figures is not None:
         untraced = trace(figures, dataset)
         implausible = plausibility(figures, compute(figures))
-        # A broken identity is a mis-read line: the dataset step gets ONE chance to
-        # re-read its sources, and the correction is kept only if it is no worse.
-        broken = [f for f in implausible
-                  if not f.startswith(("Revenue growth", "Revenue CAGR"))]
-        if broken:
-            try:
-                fix_key = cache.key("dataset_fix", ds_key)
-                redo = cache.get(fix_key) or await call_retry(
-                    f"{dataset_ctx}\n\n{FIGURES_TASK}\n\n"
-                    + DATASET_FIX_TASK.format(flags="; ".join(broken), workpaper=dataset),
-                    "dataset_fix")
-                cache.put(fix_key, redo)
-                f2, d2, _why2 = parse_figures(redo)
-                if f2 is not None:
-                    u2 = trace(f2, d2)
-                    i2 = plausibility(f2, compute(f2))
-                    if len([f for f in i2 if not f.startswith(("Revenue growth",
-                                                               "Revenue CAGR"))]) < len(broken):
-                        figures, dataset, untraced, implausible = f2, d2, u2, i2
-            except RuntimeError as exc:
-                result.notes.append({"section": "financial dataset",
-                                     "reason": f"correction pass failed: {exc}"})
+
+    # A broken identity is a mis-read line, and so is a tied statement called unbalanced
+    # or a group called a double count (with or without a figures block): the dataset
+    # step gets ONE chance to re-read its sources, and the correction is kept only if it
+    # is no worse.
+    def faults(found: list[str], workpaper: str, fig: Any = None) -> list[str]:
+        tnw = [(p.label, p["tnw"]) for p in (fig.periods if fig is not None else [])
+               if p["tnw"] is not None]
+        return ([f for f in found if not f.startswith(("Revenue growth", "Revenue CAGR"))]
+                + misread(workpaper)
+                + [f"statement misread: {m}" for m in tnw_misreads(tnw, statements)])
+
+    broken = faults(implausible, dataset, figures)
+    if broken:
+        try:
+            fix_key = cache.key("dataset_fix", ds_key)
+            redo = cache.get(fix_key) or await call_retry(
+                f"{dataset_ctx}\n\n{FIGURES_TASK}\n\n"
+                + DATASET_FIX_TASK.format(flags="; ".join(broken), workpaper=dataset),
+                "dataset_fix")
+            cache.put(fix_key, redo)
+            f2, d2, _why2 = parse_figures(redo)
+            if f2 is not None or figures is None:
+                u2 = trace(f2, d2) if f2 is not None else []
+                i2 = plausibility(f2, compute(f2)) if f2 is not None else []
+                if len(faults(i2, d2, f2)) < len(broken):
+                    figures, dataset, untraced, implausible = f2, d2, u2, i2
+                    why_not = _why2 if f2 is None else why_not
+        except RuntimeError as exc:
+            result.notes.append({"section": "financial dataset",
+                                 "reason": f"correction pass failed: {exc}"})
+    if figures is not None:
+        # A year whose accounts are titled provisional is not audited, whatever the
+        # dataset step said: growth, CAGR and the base case are read off the basis.
+        prov = cam_facts.provisional_periods(docs)
+        relabelled = [p.label for p in figures.periods if p.basis == "audited"
+                      and cam_facts.statement_period(p.label) in prov]
+        for p in figures.periods:
+            if p.label in relabelled:
+                p.basis = "provisional"
+        if relabelled:
+            dataset += ("\n**Basis corrected by PRISM:** " + ", ".join(relabelled)
+                        + " — the accounts on file are titled provisional/unaudited, so "
+                        "these periods are provisional, not audited.\n")
         dataset = f"{dataset.rstrip()}\n\n{ratios_markdown(figures)}\n"
         if untraced:
             dataset += ("\n**Figures not in the workpaper's tables, so not used:** "
@@ -1595,6 +2202,44 @@ async def draft_staged(*, generate: Engine, system: str, prompt: MasterPrompt,
                           "periods": [{"period": p.label, "basis": p.basis, **p.v}
                                       for p in figures.periods]}
     computed = figures is not None       # if not, Machine QA says why (why_not)
+    # v2: the tables that carry the ledger's and the locked figures, rendered by PRISM.
+    cap = cam_facts.facility_lakh(term_text, deal_context)
+    rubric = cam_findings.load_rubric(rubric_path) if ledger is not None else {}
+    sized = (cam_findings.assess(ledger, figures, cap, rubric.get("params"),
+                                 cam_facts.facility_rate(term_text))
+             if ledger is not None else {})
+    tables = (cam_facts.rendered_tables(
+        ledger, figures, {"DSCR": (sized["period"], sized["dscr"])} if "dscr" in sized else None)
+        if ledger is not None else {})
+    # v2: the credit picture — each signal set by the credit team's rubric, in code.
+    findings: list[cam_findings.Finding] = []
+    if ledger is not None:
+        findings = cam_findings.evaluate(
+            rubric, ledger, figures,
+            statements_tie=all(bool(s.tied) for s in statements) if statements else None,
+            facility_lakh=cap, overrides=signal_overrides,
+            facility_rate=cam_facts.facility_rate(term_text))
+        picture = cam_findings.picture_table(findings)
+        if picture:
+            tables["picture"] = picture
+        sizing = cam_findings.limit_table(sized)
+        if sizing:
+            tables["limits"] = sizing
+        result.findings = [asdict(f) for f in findings]
+    findings_block = cam_findings.block(findings)
+    if cap:
+        # Pulze's second draft recommended Rs 200 lakh against a term sheet "up to" 100.
+        findings_block = (f"{findings_block}\n\n" if findings_block else "") + (
+            f"FACILITY CAP: the facility asked for is up to Rs. {cap:,.1f} lakh (the term "
+            "sheet; the Register's line where no term sheet is on file). The recommendation "
+            "names ONE amount, no higher — lower where the limit sizing supports less. Where "
+            "another bank funds the same current assets, its written consent (pari passu / "
+            "NOC) is a condition before the FIRST disbursement in every list of conditions.")
+    tables_block = cam_facts.tables_block(tables)
+    placed: dict[str, list[str]] = {}
+    left = misread(dataset)
+    if left:
+        misreads["Financial dataset workpaper"] = left
     result.workpaper_md = dataset
     progress("Locking the financial dataset", 1, 1)
 
@@ -1613,13 +2258,19 @@ async def draft_staged(*, generate: Engine, system: str, prompt: MasterPrompt,
     qa = f"===== QUALITY BAR (read-through checklist) =====\n{prompt.qa}" if prompt.qa else ""
     body_specs = [s for s in prompt.sections if not s.final]
     final_specs = [s for s in prompt.sections if s.final]
+    # What the checks hold the writing to: everything on file, the years still projected,
+    # and (once the Recommendation is written) the one amount it names.
+    sources = "\n".join([*(d.text for d in docs), deal_context, term_text])
+    projected = {cam_facts.statement_period(p.label) for p in (figures.periods if figures else [])
+                 if p.basis == "projected"} - {""}
+    decided: float | None = None
     written: dict[int, str] = {}
     total = len(prompt.sections)
     progress("Writing sections", 0, total)
     # Every figure a section may state is in one of these; one that is not is a data
     # error until shown otherwise.
     known = figure_index(dataset, *fact_sheets, *(d.text for d in docs), deal_context,
-                         public_context, analyst_notes)
+                         public_context, analyst_notes, ledger_block, *tables.values())
     traced_off: dict[str, list[str]] = {}
     missing_claims: dict[str, list[str]] = {}
     # Which kinds of document PRISM read, by name. A statement and its analysis answer
@@ -1645,7 +2296,11 @@ async def draft_staged(*, generate: Engine, system: str, prompt: MasterPrompt,
     def polish(spec: SectionSpec, text: str) -> str:
         if not text.lstrip().startswith("#"):
             text = f"## {spec.heading}\n\n{text}"
-        text = tidy_citations(text.strip(), names)
+        text = strip_sources(tidy_citations(text.strip(), names))
+        if tables:
+            text, got = cam_facts.place_tables(text, tables)
+            if got:
+                placed[spec.heading] = got
         if spec.heading.upper().startswith("ANNEXURE"):
             text = prune_annexure(text)
         return text.strip()
@@ -1663,32 +2318,190 @@ async def draft_staged(*, generate: Engine, system: str, prompt: MasterPrompt,
         else:
             off = untraced_figures(text, known, names)
             gone = claims_missing(text, present)
-            if off or gone:
-                # One correction pass: figures no source has, and documents called
-                # missing that were read, named back to the writer with its own draft.
-                # What survives it is named in Machine QA.
+            wrong = misread_claims(text, statements) + asset_claims(text, declared)
+            plain = internal_terms(text)
+            if off or gone or wrong or plain:
+                # One correction pass: figures no source has, documents called missing
+                # that were read, and statements misread against their own arithmetic,
+                # named back to the writer with its own draft. What survives it is named
+                # in Machine QA.
                 issues = "\n".join(
                     ([f"- figures in no source: {', '.join(off[:30])}"] if off else [])
-                    + [f"- document called missing: {g}" for g in gone[:10]])
+                    + [f"- document called missing: {g}" for g in gone[:10]]
+                    + [f"- statement misread: {w}" for w in wrong[:10]]
+                    + [f"- internal code or tool talk the committee should not read: {t}"
+                       for t in plain[:10]])
                 try:
                     redo = polish(spec, await call_retry(
                         f"{context}\n\n{task}\n\n" + REPAIR_TASK.format(
-                            issues=issues, draft=text), "repair", effort))
+                            issues=issues, draft=text), "repair", repair_effort or effort))
                     if redo.startswith("#") and len(redo) > len(text) * 0.5:
                         text = redo
                         off = untraced_figures(text, known, names)
                         gone = claims_missing(text, present)
+                        wrong = misread_claims(text, statements) + asset_claims(text, declared)
+                        plain = internal_terms(text)
                 except RuntimeError:
                     pass                    # the first draft stands; QA names what is wrong
             if off:
                 traced_off[spec.heading] = off
             if gone:
                 missing_claims[spec.heading] = gone
+            if wrong:
+                misreads[spec.heading] = wrong
+            if plain:
+                jargon[spec.heading] = plain
         written[spec.order] = text
         progress("Writing sections", len(written), total)
 
-    fixed = [locked, notes_block, qa]
-    await asyncio.gather(*(write(s, section_ctx(s, fixed)) for s in body_specs))
+    def checks_of(text: str) -> tuple[list[str], list[str], list[str], list[str]]:
+        return (untraced_figures(text, known, names), claims_missing(text, present),
+                misread_claims(text, statements) + asset_claims(text, declared),
+                internal_terms(text))
+
+    async def critic_call(user: str) -> str:
+        """The reviewer: the critic engine when one is configured, else the writer's."""
+        if critic is None:
+            return await call_retry(user, "critic")
+        async with gate:
+            result.calls += 1
+            with stage("critic"):
+                return await critic(base_system, [{"role": "user", "content": user}])
+
+    async def write_v2(spec: SectionSpec, context: str) -> None:
+        """Plan, write sub-section by sub-section, review, repair only what failed. A part
+        that is a transcription or a reference table (appendix, annexures) keeps the
+        single call, as does any part whose plan cannot be read."""
+        if spec.heading.upper().startswith(("APPENDIX", "ANNEXURE")):
+            await write(spec, context)
+            return
+        task = section_task(spec, computed, terms=bool(term_block),
+                            glance_token="picture" in tables)
+        rules = task.replace(f"Write ONLY this part of the CAM: {spec.title}",
+                             f"THE PART'S RULES — {spec.title}", 1)
+        label = "final_section" if spec.final else "section"
+        effort = final_effort if spec.final else section_effort
+        owned = cam_findings.homes_of(findings, spec.heading)
+        # The plan needs to know what each document offers, not all of it: every sheet,
+        # the longest clipped, at twice a sub-section's budget (12 outline calls read
+        # 1.07M tokens of whole context on Pulze, Oct 2026).
+        # A final part (summary, recommendation) is written FROM the body: its context is
+        # the body as written, never trimmed to fact sheets.
+        plan_ctx = context if not sub_sheet_chars or spec.final else "\n\n".join(
+            [head, *primaries(spec.heading),
+             *fit_for(typed, 2 * sub_sheet_chars, wanted(spec.heading)), *[b for b in fixed if b]])
+        try:
+            plan = parse_outline(await call_retry(
+                f"{plan_ctx}\n\n" + OUTLINE_TASK.format(
+                    title=spec.title, spec=spec.spec,
+                    owned="; ".join(f"[{f.id}] {f.topic}" for f in owned) or "none",
+                    tokens=", ".join(f"{{{{table:{k}}}}}" for k in tables) or "none"),
+                "outline", effort), [f.id for f in owned], list(tables))
+        except RuntimeError:
+            plan = None
+        if not plan:
+            await write(spec, context)
+            return
+        rng = spec.word_range
+        words = max(120, int(((rng[0] + rng[1]) / 2 if rng else 900) / len(plan)))
+        by_id = {f.id: f for f in findings}
+
+        def sub_ctx(item: dict[str, Any], budget: int, about: str = "") -> str:
+            """A sub-section's context: everything it may quote, and only its own sheets. A
+            final part's is its whole context — the trimmed one left out the CAM body, and
+            Pulze's executive summary disagreed with its own recommendation."""
+            if not sub_sheet_chars or spec.final:
+                return context
+            return "\n\n".join([head, *primaries(spec.heading), *[b for b in fixed if b],
+                                *fit_relevant(typed, budget, wanted(spec.heading),
+                                              f"{spec.title} {item['heading']} {item['covers']} "
+                                              f"{about}")])
+
+        def ask(item: dict[str, Any], ctx: str | None = None) -> str:
+            others = "; ".join(f"{o['heading']} ({o['covers']})" for o in plan if o is not item)
+            fnd = [by_id[i] for i in item["findings"] if i in by_id]
+            return (f"{ctx or sub_ctx(item, sub_sheet_chars)}\n\n{rules}\n\n" + SUB_TASK.format(
+                heading=item["heading"], title=spec.title, covers=item["covers"],
+                others=others or "none", words=words,
+                findings=("Explain these findings here, in four beats, signals unchanged: "
+                          + " | ".join(f"[{f.id}] {f.signal}: {f.evidence}" for f in fnd)
+                          + "\n") if fnd else "",
+                table=(f"Place the token {{{{table:{item['table']}}}}} alone on a line where "
+                       "the table belongs.\n") if item.get("table") else ""))
+
+        async def draft_sub(item: dict[str, Any]) -> str:
+            try:
+                return clean_sub(item["heading"], await call_retry(ask(item), label, effort))
+            except RuntimeError as exc:
+                result.notes.append({"section": f"{spec.title} — {item['heading']}",
+                                     "reason": str(exc)})
+                return (f"### {item['heading']}\n\n> This sub-section could not be drafted "
+                        f"({exc}). Regenerate, or write it by hand.")
+
+        subs = list(await asyncio.gather(*(draft_sub(it) for it in plan)))
+        # REVIEW: PRISM's own checks per sub-section, then the reviewer on the whole part.
+        issues: dict[int, list[str]] = {}
+        for n, sub in enumerate(subs):
+            off, gone, wrong, plain = checks_of(sub)
+            issues[n] = ([f"figures in no source: {', '.join(off[:20])}"] if off else []) \
+                + [f"document called missing: {g}" for g in gone[:5]] \
+                + [f"statement misread: {w}" for w in wrong[:5]] \
+                + [f"internal code or tool talk: {t}" for t in plain[:5]] \
+                + [f"recommends {a} — above the facility cap of Rs. {cap:,.1f} lakh; recommend "
+                   "one amount within it" for a in over_cap(sub, cap)] \
+                + [f"recommends {a} — the Recommendation names Rs. {decided:,.1f} lakh; state "
+                   "that amount" for a in off_amount(sub, decided)] \
+                + [f"unsupported: {u}" for u in unsupported(sub, sources)] \
+                + [f"condition: {c}" for c in condition_faults(sub, projected)]
+        try:
+            review = parse_issues(await critic_call(
+                CRITIC_TASK.format(standards=REVIEW_STANDARDS, title=spec.title,
+                                   findings=findings_block or "none",
+                                   ledger=ledger_block or "none",
+                                   part="\n\n".join(subs))))
+        except RuntimeError:
+            review = []
+        heads = [it["heading"].casefold() for it in plan]
+        for it in review:
+            hit = next((i for i, h in enumerate(heads)
+                        if h and h in it["subsection"].casefold()), None)
+            if hit is not None:
+                issues[hit].append(f"{it['problem']} — fix: {it['fix']}")
+        result.reviews.append({"section": spec.title, "issues": [
+            {"subsection": plan[n]["heading"], "issue": i} for n, v in issues.items() for i in v]})
+
+        async def repair(n: int) -> None:
+            # A repair fixes named points in a written sub-section: the figures it may
+            # quote whole, and a third of the sheets — those its issues and topic name.
+            # Every Pulze sub-section was repaired, each re-sent ~39k tokens (2.05M).
+            listed = "\n".join(f"- {i}" for i in issues[n])
+            try:
+                redo = clean_sub(plan[n]["heading"], await call_retry(
+                    ask(plan[n], sub_ctx(plan[n], sub_sheet_chars // 3, listed)) + "\n\n"
+                    + REPAIR_SUB_TASK.format(issues=listed, text=subs[n]),
+                    "repair", repair_effort or effort))
+                if len(redo) > len(subs[n]) * 0.4:
+                    subs[n] = redo
+            except RuntimeError:
+                pass                                # the draft stands; QA names what is left
+
+        await asyncio.gather(*(repair(n) for n, v in issues.items() if v))
+        text = polish(spec, f"## {spec.heading}\n\n" + "\n\n".join(subs))
+        off, gone, wrong, plain = checks_of(text)
+        if off:
+            traced_off[spec.heading] = off
+        if gone:
+            missing_claims[spec.heading] = gone
+        if wrong:
+            misreads[spec.heading] = wrong
+        if plain:
+            jargon[spec.heading] = plain
+        written[spec.order] = text
+        progress("Writing sections", len(written), total)
+
+    fixed = [locked, notes_block, findings_block, tables_block, qa]
+    writer = write_v2 if harness == "v2" else write
+    await asyncio.gather(*(writer(s, section_ctx(s, fixed)) for s in body_specs))
 
     # 4. FINAL sections, from the finished body ------------------------------------------
     body = "\n\n".join(written[s.order] for s in body_specs)
@@ -1697,7 +2510,8 @@ async def draft_staged(*, generate: Engine, system: str, prompt: MasterPrompt,
     def final_ctx(heading: str) -> str:
         prim = primaries(heading)
         room = max(ctx_budget - len(locked) - sum(len(x) for x in prim), 20_000)
-        return "\n\n".join([head, *prim, locked, *fit([body_block], room), notes_block, qa])
+        return "\n\n".join([head, *prim, locked, *fit([body_block], room), notes_block,
+                              findings_block, tables_block, qa])
 
     async def title_page() -> str:
         try:
@@ -1710,9 +2524,22 @@ async def draft_staged(*, generate: Engine, system: str, prompt: MasterPrompt,
         return "\n".join(ln for ln in text.strip().splitlines()
                          if not ln.lstrip().startswith("#")).strip()
 
-    finals = await asyncio.gather(title_page(),
-                                  *(write(s, final_ctx(s.heading)) for s in final_specs))
-    title = tidy_citations(str(finals[0] or ""), names)
+    # The Recommendation first: its amount is the one every other final part states.
+    rec = [s for s in final_specs if "RECOMMENDATION" in s.heading.upper()]
+    rest = [s for s in final_specs if s not in rec]
+    first = await asyncio.gather(title_page(), *(writer(s, final_ctx(s.heading)) for s in rec))
+    named = [lakh for s in rec for _a, lakh in recommended(written.get(s.order, ""))]
+    if named:
+        decided = max(set(named), key=named.count)
+
+    def after_rec(heading: str) -> str:
+        ctx = final_ctx(heading)
+        return ctx if decided is None else (
+            f"{ctx}\n\nTHE RECOMMENDATION AS WRITTEN names Rs. {decided:,.1f} lakh. State "
+            "that amount wherever this part gives one; never another.")
+
+    await asyncio.gather(*(writer(s, after_rec(s.heading)) for s in rest))
+    title = strip_sources(tidy_citations(str(first[0] or ""), names))
 
     # 5. ASSEMBLE -----------------------------------------------------------------------
     parts = [written[s.order] for s in prompt.sections]
@@ -1721,6 +2548,8 @@ async def draft_staged(*, generate: Engine, system: str, prompt: MasterPrompt,
         first_annex = next((n for n, s in enumerate(prompt.sections)
                             if s.title.startswith("ANNEXURE")), len(parts))
         parts.insert(first_annex, checks.strip())
+    parts = cam_facts.once(parts, tables)
+    amounts = sorted({round(lakh, 1) for p in parts for _a, lakh in recommended(p)})
     # Two trailing spaces: a Markdown line break, so the title block stays one line each.
     title_md = "  \n".join(ln.strip() for ln in title.splitlines() if ln.strip())
     result.draft_md = (f"# {doc_title}\n\n" + (f"{title_md}\n\n" if title_md else "")
@@ -1732,9 +2561,17 @@ async def draft_staged(*, generate: Engine, system: str, prompt: MasterPrompt,
     result.qa = machine_qa(prompt, result.draft_md, dataset, ratios_from_code=computed,
                            ratios_note=why_not, implausible=implausible, untraced=untraced,
                            traced_off=traced_off, missing_claims=missing_claims,
+                           misreads=misreads if statements or declared else None,
+                           jargon=jargon, unused=unused_documents(docs, joined, kinds,
+                                                                  result.draft_md),
+                           tables=({k: [h for h, got in placed.items() if k in got]
+                                    for k in tables} if ledger is not None else None),
+                           conflicts=([k for k, _fs in ledger.conflicts()]
+                                      if ledger is not None else None),
                            terms_off=(terms_drift(appendix, term_text)
                                       if appendix is not None and term_text.strip() else None),
-                           term_sheet=bool(term_text.strip()) if appendix is not None else None)
+                           term_sheet=bool(term_text.strip()) if appendix is not None else None,
+                           amounts=amounts if ledger is not None else None)
     result.workpaper_md = f"{dataset.rstrip()}\n\n{qa_markdown(result.qa)}\n"
     progress("Done", total, total)
     return result

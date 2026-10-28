@@ -157,6 +157,58 @@ def test_parse_odl_json_typed_elements():
     assert odl.image_count == 1 and odl.doc_title == "Sanction"
 
 
+def test_parse_odl_json_reads_numbered_lists():
+    """OpenDataLoader keeps a list's entries under "list items", not "kids". Read only
+    "kids" and a net-worth form (Oct 2026) lost its name, assets and summary -- the CAM
+    then called the guarantors' forms liabilities-only. Names and figures are made up."""
+    def item(text, *kids):
+        return {"type": "list item", "page number": 1, "content": text, "kids": list(kids)}
+
+    def lst(*items, page=1):
+        return {"type": "list", "page number": page, "list items": list(items)}
+
+    property_table = {"type": "table", "page number": 1, "rows": [
+        {"cells": [{"column number": 1, "content": "Location"},
+                   {"column number": 2, "content": "Value"}]},
+        {"cells": [{"column number": 1, "content": "641001"},
+                   {"column number": 2, "content": "80 L"}]}]}
+    data = {"number of pages": 2, "kids": [
+        {"type": "text block", "kids": [
+            {"type": "paragraph", "page number": 1, "content": "Networth of Guarantors"},
+            lst(item("1. Name of the Guarantor : R EXAMPLE"),
+                item("6. DETAILS OF ASSETS",
+                     lst(item("i) MOVABLE ASSETS", lst(item("a) Vehicles : 4L"))),
+                         item("iii) IMMOVABLE PROPERTIES", property_table)))),
+        ]},
+        {"type": "text block", "kids": [
+            {"type": "list", "page number": 2, "list items": [
+                {"type": "list item", "page number": 2, "kids": [],
+                 "content": "8. SUMMARY Total Assets : 84L Net Assets : 64L"}]}]},
+    ]}
+    odl = parse_odl_json(data)
+    assert [e.type for e in odl.elements] == ["paragraph", "list", "table", "list"]
+    assert odl.elements[1].text == ("1. Name of the Guarantor : R EXAMPLE\n6. DETAILS OF ASSETS"
+                                    "\n  i) MOVABLE ASSETS\n    a) Vehicles : 4L"
+                                    "\n  iii) IMMOVABLE PROPERTIES")
+    # A table inside an item stays a table, in reading order.
+    assert odl.elements[2].table_rows == [["641001", "80 L"]]
+    assert odl.elements[3].page == 2 and "Net Assets : 64L" in odl.elements[3].text
+
+
+def test_a_cached_pdf_is_read_again_when_the_pdf_reader_changes(tmp_path, monkeypatch):
+    from app import extract as extract_mod
+    from app.extract import PDF_VERSION, PIPELINE_VERSION, Extractor
+
+    class _S:
+        data_dir = str(tmp_path)
+
+    monkeypatch.setattr(extract_mod, "run_pipeline", lambda src, **kw: run_pipeline(
+        _write(tmp_path, "t.xlsx", covenants_xlsx())))
+    Extractor(_S()).extract("EVAM", "form.pdf", b"%PDF-made-up", use_sarvam=False)  # type: ignore[arg-type]
+    names = [p.name for p in (tmp_path / ".extract-cache" / "EVAM").iterdir()]
+    assert names and all(n.endswith(f"-v{PIPELINE_VERSION}-p{PDF_VERSION}.json") for n in names)
+
+
 def test_opendataloader_runs_local_never_hybrid(tmp_path, monkeypatch):
     """The ODL call must pin the local Java pipeline: `--hybrid off`, no hybrid URL."""
     import json

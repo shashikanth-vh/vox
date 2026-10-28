@@ -89,7 +89,54 @@ def extract_text(ctype: str, blob: bytes) -> tuple[str, str | None]:
     if image_suffix(ctype, blob):
         return "", ("an image — reading it needs OCR: configure DocRAG with Sarvam "
                     "(WORKFLOWS_DOCRAG_URL + SARVAM_API_KEY)")
+    if is_word97(blob):
+        text = word97_text(blob)
+        if text.strip():
+            return text, None
+        return "", "the Word 97–2003 .doc holds no recoverable text"
     return "", f"binary content ({ctype or 'unknown type'}) — no extractor for this format"
+
+
+_OLE2_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+# "WordDocument", the stream every Word 97–2003 file carries, as its OLE directory spells it.
+_WORD_STREAM = "WordDocument".encode("utf-16-le")
+# Word's own furniture, found in every .doc's style and font tables — not the document.
+_WORD_NOISE = re.compile(
+    r"^(?:Normal|Default Paragraph Font|Table Normal|No List|Heading \d|Title|Header|Footer|"
+    r"Times New Roman|Arial|Calibri|Cambria|Symbol|Wingdings|Courier New|Microsoft Word.*|"
+    r"Root Entry|WordDocument|SummaryInformation|DocumentSummaryInformation|CompObj|"
+    r"[01]Table|Data|Page Number|Balloon Text|Hyperlink|List Paragraph|Body Text.*)$")
+
+
+def is_word97(blob: bytes) -> bool:
+    return blob.startswith(_OLE2_MAGIC) and _WORD_STREAM in blob[:1 << 20]
+
+
+def word97_text(blob: bytes) -> str:
+    """The text of a Word 97–2003 .doc, recovered without a Word parser: Word stores a
+    document's characters either as 8-bit text or as UTF-16, so both kinds of printable
+    run are read and the richer one kept, less Word's style and font names. Layout and
+    tables are lost — the CAM said "Word" files could not be read at all (net-worth
+    statements are routinely sent as .doc), which is worse than reading their words."""
+    utf16 = [m.group(0).decode("utf-16-le", "ignore")
+             for m in re.finditer(rb"(?:[\x20-\x7e\r\t]\x00){4,}", blob)]
+    ascii_ = [m.group(0).decode("latin-1")
+              for m in re.finditer(rb"[\x20-\x7e\r\t]{6,}", blob)]
+
+    def keep(runs: list[str]) -> list[str]:
+        out = []
+        for r in runs:
+            r = re.sub(r"[\r\t]+", "\n", r).strip()
+            if r and not _WORD_NOISE.match(r) and re.search(r"[A-Za-z0-9]{2}", r):
+                out.append(r)
+        return out
+
+    a, b = keep(utf16), keep(ascii_)
+    best = a if sum(map(len, a)) >= sum(map(len, b)) else b
+    if not best:
+        return ""
+    return ("[Word 97–2003 .doc — text recovered without its layout]\n"
+            + "\n".join(dict.fromkeys(best)))
 
 
 # Images DocRAG reads by OCR, by content type and by their leading bytes.
@@ -208,6 +255,46 @@ def _inline_layout_tables(page: str) -> str:
     return "".join(stack[0])
 
 
+_HTML_ROW = re.compile(r"(?is)<tr\b[^>]*>(.*?)(?:</tr\s*>|(?=<tr\b)|$)")
+_HTML_TD = re.compile(r"(?is)<t[dh]\b[^>]*>(.*?)(?:</t[dh]\s*>|(?=<t[dh]\b)|$)")
+# The innermost table: one with no table inside it (a nested table is converted first).
+_HTML_WHOLE_TABLE = re.compile(r"(?is)<table\b[^>]*>(?:(?!<table\b).)*?</table\s*>")
+
+
+def markdown_tables(text: str) -> str:
+    """Every HTML table embedded in extracted text, as a Markdown table.
+
+    DocRAG passes Sarvam OCR pages through as they come, and those carry their tables as
+    raw ``<table><tr><td>`` markup. The CAM's readers (statement arithmetic, net-worth
+    forms, bank limits) read cells split by ``|``; on raw markup they took ``<td>`` for a
+    group's label, called a tied balance sheet unrebuildable and missed every
+    guarantor's declared assets (Oct 2026, cipher-test). The rest of the text is left
+    exactly as it was."""
+    import html
+
+    if not re.search(r"(?i)<t[dr]\b", text or ""):
+        return text
+
+    def one(m: re.Match[str]) -> str:
+        rows = []
+        for tr in _HTML_ROW.findall(m.group(0)):
+            # A nested table, already converted, sits in its cell as one line of values.
+            cells = [re.sub(r"[\s|]+", " ", re.sub(r"\|(?:\s*-{3}\s*\|)+", "",
+                                                   html.unescape(re.sub(r"<[^>]+>", " ", c))))
+                     .strip() for c in _HTML_TD.findall(tr)]
+            if any(cells):
+                rows.append("| " + " | ".join(cells) + " |")
+        if not rows:
+            return html.unescape(re.sub(r"<[^>]+>", " ", m.group(0)))
+        width = max(r.count(" | ") + 1 for r in rows)
+        return "\n" + "\n".join([rows[0], "|" + " --- |" * width] + rows[1:]) + "\n"
+
+    while True:
+        text, n = _HTML_WHOLE_TABLE.subn(one, text)
+        if not n:
+            return text
+
+
 def html_text(blob: bytes) -> str:
     """The readable text of an HTML page: scripts, styles and inline images dropped,
     block elements as line breaks and table cells separated, so a report's
@@ -263,6 +350,54 @@ _ASK_SYSTEM = (
     "answer from your own knowledge. You have no file system, web or code access: never "
     "claim to have run a public check or written a file. Answer in clean Markdown."
 )
+
+
+_SIGNAL_VERDICT = {"RED": "UGLY", "AMBER": "BAD", "GREEN": "GOOD", "BLUE": "POLICY"}
+
+
+def monitor_lines(rows: list[dict[str, Any]], since: str) -> list[tuple[str, str]]:
+    """(lowercased title, one line) for each finding the PULSE monitor filed — News and
+    Regulatory, not dismissed, dated on or after ``since`` — newest first. Each line says
+    who the story is about, which name it was found under, the verdict and the
+    monitor's evidence reading, so a writer can weigh it rather than guess at it."""
+    out: list[tuple[str, str, str]] = []
+    for row in rows:
+        p = row.get("payload") or {}
+        if row.get("is_dismissed") or row.get("intel_type") not in ("News", "Regulatory"):
+            continue
+        when = str(p.get("when") or row.get("observed_at") or row.get("pulled_at") or "")
+        day = (f"{when[:4]}-{when[4:6]}-{when[6:8]}"
+               if len(when) >= 8 and when[:8].isdigit() else when[:10])
+        if day and day < since:
+            continue
+        title = str(row.get("title") or "").strip()
+        if not title:
+            continue
+        sev = str(p.get("severity") or _SIGNAL_VERDICT.get(str(row.get("signal") or ""), ""))
+        parts = [f"{day or '?'} · {title} — "
+                 f"{p.get('publisher') or str(row.get('source') or '').replace('PULSE:', '') or '?'}",
+                 f"PULSE verdict {sev or 'untagged'} ({row.get('signal') or '—'})"]
+        if row.get("intel_type") == "Regulatory":
+            parts.append("official record")
+        if p.get("about"):
+            parts.append(f"about {p['about']}")
+        if p.get("matched"):
+            parts.append(f"found under '{p['matched']}'")
+        if p.get("reason"):
+            parts.append(f"why: {str(p['reason'])[:160]}")
+        ev = p.get("evidence")
+        if isinstance(ev, dict):
+            # PULSE's evidence reading: an allegation, an action or an outcome, and how
+            # far along — the difference between "accused" and "convicted".
+            bits = [str(ev.get(k)) for k in ("nature", "stage") if ev.get(k) not in (None, "unknown")]
+            bits += [f"forum {', '.join(map(str, ev['forums']))}"] if ev.get("forums") else []
+            bits += [f"Rs {ev['amount_cr']} cr"] if ev.get("amount_cr") else []
+            ev = ", ".join(bits)
+        if ev:
+            parts.append(f"evidence: {str(ev)[:160]}")
+        out.append((day, title.lower(), " · ".join(parts)))
+    out.sort(key=lambda x: x[0], reverse=True)
+    return [(t, line) for _d, t, line in out]
 
 
 # --------------------------------------------------------------------------- #
@@ -538,6 +673,14 @@ def _as_text(content: Any) -> str:
                          if isinstance(b, dict) and b.get("type") == "text")
 
 
+def build_critic(settings: Any) -> CamEngine | None:
+    """v2's reviewer engine, when the deployment names one (cam_critic_engine)."""
+    spec = (getattr(settings, "cam_critic_engine", "") or "").strip()
+    if not spec:
+        return None
+    return build_engine(settings.model_copy(update={"cam_engine": spec}))
+
+
 def build_engine(settings: Any) -> CamEngine:
     spec = (getattr(settings, "cam_engine", "") or "anthropic:claude-haiku-4-5").strip()
     provider, _, model = spec.partition(":")
@@ -654,6 +797,12 @@ class StagedDraftIn(BaseModel):
     # Human names for the documents (the UI has them): used in the manifest and in
     # [source: …] tags instead of raw ids.
     doc_titles: dict[str, str] = Field(default_factory=dict, max_length=200)
+    # The CAM harness for this draft ("v1" | "v2"); empty = the deployment's
+    # WORKFLOWS_CAM_HARNESS. Lets one desk compare the two on the same file.
+    harness: str | None = Field(default=None, pattern=r"^v[12]$")
+    # v2: signals the analyst sets for this draft, by finding id, each with a reason —
+    # {"leverage": {"signal": "AMBER", "note": "includes a promoter loan being converted"}}.
+    signal_overrides: dict[str, dict[str, str]] = Field(default_factory=dict, max_length=40)
 
 
 class FinaliseIn(BaseModel):
@@ -671,6 +820,14 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
     rest of the API — the helpers come from create_app)."""
 
     engine = build_engine(settings)
+    critic_engine = build_critic(settings)
+
+    def _critic(http: Any) -> Any:
+        """v2's reviewer as a staged-drafter engine, or None (the writer reviews)."""
+        if critic_engine is None:
+            return None
+        return lambda sys, t, **kw: critic_engine.generate(http, sys, t, **kw)
+
     base = settings.register_base_url.rstrip("/")
     max_doc_chars = int(getattr(settings, "cam_max_doc_chars", 60_000))
     total_budget = int(getattr(settings, "cam_max_total_doc_chars", 450_000))
@@ -755,7 +912,7 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
             r, failure = None, type(exc).__name__
         if r is not None and failure is None:
             body = r.json() or {}
-            md = body.get("markdown") or ""
+            md = markdown_tables(body.get("markdown") or "")
             info = {"via": "docrag", "engines": body.get("extraction_engines") or [],
                     "warnings": body.get("warnings") or [],
                     "doc_type": body.get("doc_type") or "", "pages": body.get("page_count"),
@@ -922,7 +1079,6 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
 
         if entity is None:
             return ""
-        company = str(entity.get("legal_name") or entity.get("display_name") or "")
         out: list[str] = []
         board: list[str] = []
         path = "/v1/panorama/financials"
@@ -963,16 +1119,48 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
                 if pts:
                     out.append(f"  {label} ({unit}, as filed — not converted): " + "; ".join(
                         f"{p.get('fy') or p.get('year')}: {p.get('value')}" for p in pts[-4:]))
+        since = (_dt.date.today() - _dt.timedelta(days=365)).isoformat()
+        # Who the news is about: every name the firm goes by (legal, trading, the news
+        # names an analyst set) and its people (the Register's key people, then the
+        # board). The CAM used to search one name and, with no Tracxn board for a
+        # partnership, nobody — so it found nothing, or a namesake.
+        firm_names = list(dict.fromkeys(
+            str(n).strip() for n in [entity.get("legal_name"), entity.get("display_name"),
+                                     *(entity.get("news_aliases") or [])]
+            if str(n or "").strip()))
+        people: list[tuple[str, str]] = []
+        for p in [*(entity.get("key_people") or []), *({"name": b} for b in board)]:
+            name = str((p.get("name") if isinstance(p, dict) else p) or "").strip()
+            role = str(p.get("role") or "").strip() if isinstance(p, dict) else ""
+            if name and all(name.casefold() != n.casefold() for n, _r in people):
+                people.append((name, role))
+        people = people[:6]
+        # What the monitor already found and filed — searched under these names AND
+        # checked (the firm named with its city or sector, a person with the firm, the
+        # evidence read) — and what the desk did not dismiss. The cleanest news PRISM has.
+        filed, filed_note = await _monitor_findings(request, caller, who,
+                                                    str(entity.get("id") or ""), since)
+        if filed_note:
+            out.append(f"PULSE monitor findings (Register): {filed_note}")
+        elif filed:
+            out.append(f"PULSE monitor findings filed in the Register (last 12 months, "
+                       f"{len(filed)}; checked by the monitor to be about the firm or its "
+                       "people; dismissed ones left out):")
+            out += [f"  - {line}" for _t, line in filed[:25]]
+        else:
+            out.append("PULSE monitor findings (Register): none filed for this firm in the "
+                       "last 12 months.")
         pulse_url = (getattr(settings, "pulse_url", "") or "").rstrip("/")
         if not pulse_url:
-            out.append("PULSE (news): not configured on this deployment.")
-        elif company:
-            since = (_dt.date.today() - _dt.timedelta(days=365)).isoformat()
-            core = name_core(company) or company
+            out.append("PULSE (live news search): not configured on this deployment.")
+        elif firm_names:
             items: list[str] = []
-            seen: set[str] = set()
+            seen: set[str] = {t for t, _line in filed}
             failed = 0
-            terms = [(core, company, False)] + [(n, n, True) for n in board[:3]]
+            terms = [(name_core(n) or n, n, False) for n in firm_names]
+            terms = list({t[0]: t for t in terms}.values())
+            terms += [(n, n, True) for n, _r in people]
+            roles = dict(people)
             for term, about, person in terms:
                 try:
                     r = await request.app.state.http.get(
@@ -993,17 +1181,80 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
                         continue
                     seen.add(title.lower())
                     sev = str(a.get("severity") or "").upper()
+                    subject = f"{roles[about]} {about}" if roles.get(about) else about
                     items.append(f"  - {a.get('when') or '?'} · {title} — {a.get('source') or '?'}"
                                  f" · PULSE verdict {sev or 'untagged'}"
                                  f" ({_VERDICT.get(sev, '—')})"
-                                 + (f" · about {about}" if person else ""))
+                                 + (f" · about {subject}" if person else f" · matched '{about}'"))
             if failed == len(terms):
-                out.append("PULSE (news): unreachable — not checked.")
+                out.append("PULSE (live news search): unreachable — not checked.")
             else:
-                out.append(f"PULSE (news, last 12 months, headlines naming the firm"
-                           f"{' or its board' if board else ''}, as of {_dt.date.today()}):")
+                searched = "; ".join(firm_names) + (
+                    " · people: " + "; ".join(f"{n} ({r})" if r else n for n, r in people)
+                    if people else " · no key people on the Register")
+                out.append(f"PULSE (live news search, last 12 months, as of "
+                           f"{_dt.date.today()}; searched under {searched}; a headline is "
+                           "kept only when it names the firm, or a person by full name):")
                 out += items[:25] or ["  none found"]
+        # The industry's own news — the credit team asked for "industry article checks
+        # before describing data points": the borrower's sector, last six months, as
+        # context for the industry section (never evidence about the borrower).
+        sector = str(entity.get("sub_sector") or entity.get("sector") or "").strip()
+        if pulse_url and sector:
+            try:
+                r = await request.app.state.http.get(
+                    f"{pulse_url}/v1/news/search",
+                    params={"q": f"{sector} India",
+                            "from": (_dt.date.today() - _dt.timedelta(days=182)).isoformat(),
+                            "limit": 10},
+                    headers={"X-API-Key": getattr(settings, "pulse_api_key", "")},
+                    timeout=60.0)
+                arts = (r.json() or {}).get("articles", []) if r.status_code < 300 else None
+            except (httpx.HTTPError, ValueError):
+                arts = None
+            if arts is None:
+                out.append(f"Industry news ({sector}): PULSE unreachable — not checked.")
+            else:
+                heads = list(dict.fromkeys(
+                    f"  - {a.get('when') or '?'} · {str(a.get('headline') or a.get('title'))
+                                                    .strip()} — {a.get('source') or '?'}"
+                    for a in arts if str(a.get("headline") or a.get("title") or "").strip()))
+                out.append(f"Industry news ({sector}, last 6 months — context for the industry "
+                           "analysis, not facts about this borrower):")
+                out += heads[:10] or ["  none found"]
+        out.append("Reading the news: a story is evidence only of what it reports — an "
+                   "allegation is not a finding, a namesake is not the borrower, and a "
+                   "sector story is context, not a fact about this firm.")
         return "\n".join(out)
+
+    async def _monitor_findings(request: Any, caller: Any, who: str, entity_id: str,
+                                since: str) -> tuple[list[tuple[str, str]], str | None]:
+        """((title, line) for each News / Regulatory row the PULSE monitor filed for this
+        firm in the window, newest first; note) — read AS the caller, so the Register's
+        RBAC decides; rows the desk dismissed are left out."""
+        import httpx
+
+        if not entity_id:
+            return [], "no entity on the Register"
+        path = "/v1/external-intelligence"
+        rows: list[dict[str, Any]] = []
+        cursor: str | None = None
+        while len(rows) < 300:
+            q = {"entity_id": entity_id, "limit": 100, **({"cursor": cursor} if cursor else {})}
+            try:
+                r = await request.app.state.http.get(
+                    f"{base}{path}", params=q,
+                    headers=_reg_headers(request, caller, who, "GET", path))
+            except httpx.HTTPError as exc:
+                return [], f"unreachable ({exc.__class__.__name__})"
+            if r.status_code >= 300:
+                return [], f"not readable (HTTP {r.status_code})"
+            body = r.json() or {}
+            rows += body.get("items", []) if isinstance(body, dict) else body
+            cursor = body.get("next_cursor") if isinstance(body, dict) else None
+            if not cursor:
+                break
+        return monitor_lines(rows, since), None
 
     async def _open_report(request: Request, caller: Any, who: str,
                            lending_id: str) -> dict[str, Any] | None:
@@ -1734,10 +1985,18 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
                     cache=_digests, model_id=engine.name, progress=progress,
                     concurrency=int(getattr(settings, "cam_pipeline_concurrency", 4)),
                     call_budget=int(getattr(settings, "cam_call_budget_chars", 360_000)),
+                    sub_sheet_chars=int(getattr(settings, "cam_sub_sheet_chars", 60_000)),
                     digest_part_chars=int(getattr(settings, "cam_digest_part_chars", 90_000)),
                     deal_context=deal, public_context=public, retry_delay_s=10.0,
+                    harness=str(job.get("harness") or "v1"),
+                    critic=_critic(http), rubric_path=getattr(settings, "cam_rubric_path", ""),
+                    signal_overrides=job.get("_overrides") or None,
                     # Only an engine that sends a reasoning effort has one to lower.
                     digest_effort=((getattr(settings, "cam_digest_reasoning_effort", "")
+                                    or None)
+                                   if "reasoning_effort" in getattr(engine, "extra_body", {})
+                                   else None),
+                    repair_effort=((getattr(settings, "cam_repair_reasoning_effort", "")
                                     or None)
                                    if "reasoning_effort" in getattr(engine, "extra_body", {})
                                    else None))
@@ -1750,7 +2009,8 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
                         fate["note"] = "; ".join(filter(None, [fate.get("note"), n["note"]]))
                     else:
                         notes.append(n)
-                job.update(qa=result.qa, figures=result.figures)
+                job.update(qa=result.qa, figures=result.figures, findings=result.findings,
+                           reviews=result.reviews)
             await _record_turn(ctx, caller, who, report["id"], "user",
                                f"[generate — {job.get('mode')}] documents: "
                                + ", ".join(d.name for d in docs))
@@ -1815,7 +2075,9 @@ def mount_cam(app: Any, settings: Any, *, denied: Any, verified_email: Any,
         job = {"job_id": job_id, "lending_id": lending_id, "report_id": report["id"],
                "report_version": report.get("report_version"), "status": "running",
                "stage": "Starting", "done": 0, "total": 0, "documents_requested": len(ids),
-               "started": _t.time(), "_who": _owner(request, who)}
+               "started": _t.time(), "_who": _owner(request, who),
+               "harness": payload.harness or (getattr(settings, "cam_harness", "") or "v1"),
+               "_overrides": dict(payload.signal_overrides)}
         # Keep the finished ones for a while (the UI polls); cap the table.
         for old in sorted(_jobs.values(), key=lambda j: j["started"])[:-100]:
             _jobs.pop(old["job_id"], None)

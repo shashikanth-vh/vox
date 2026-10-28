@@ -168,6 +168,25 @@ SENSE: dict[str, list[str]] = {
               "fraud risk management", "fraud-prevention", "fraud-detection"],
     "scam": ["scam alert", "scam awareness", "beware of scam", "'scam of the century'"],
     "recast": ["recasts its board", "recasts board", "recasts team"],
+    # An NCLT-sanctioned merger, demerger or scheme of arrangement is restructuring a
+    # healthy company chooses, not insolvency: "NCLT scheme hearing", "NCLT hearing for
+    # … merger". Insolvency still reads as UGLY on its own words (insolvency, CIRP,
+    # liquidation).
+    "nclt": ["scheme of arrangement", "scheme hearing", "merger", "amalgamation",
+             "demerger", "composite scheme", "capital reduction", "scheme of amalgamation"],
+}
+
+# Words adverse ONLY in one sense, read only with that sense nearby. "Probe" is an
+# investigation next to police, an agency or "into"; it is a semiconductor tool ("probe
+# maker", "probe capacities") or a lab reagent ("a fluorescent probe") everywhere else —
+# and two such stories reached the desk as UGLY (cipher-test, Oct 2026).
+REQUIRES: dict[str, re.Pattern[str]] = {
+    "probe": re.compile(
+        r"\b(?:police|cbi|ed|sebi|sfio|eow|dggi|vigilance|lokayukta|agency|agencies|court|"
+        r"tribunal|govt|government|ministry|regulator|rbi|income[- ]tax|it department|"
+        r"inquiry|enquiry|investigat\w*|ordered|orders|order|launch\w*|initiat\w*|"
+        r"under|into|against|fraud|scam|graft|corruption|bribe\w*|alleged|accused)\b",
+        re.I),
 }
 
 # The state-scoped themes a policy sweep asks about. Published on /v1/news/config so the
@@ -225,7 +244,11 @@ def _hit(headline: str, rx: re.Pattern[str], blocked: set[str]) -> re.Match[str]
     Checking EVERY match matters: "EV charging firm charged with fraud" has a blocked
     "charge" and a real "fraud", and stopping at the first match would drop the alert."""
     for m in rx.finditer(headline):
-        if m.group(0).lower() in blocked:
+        word = m.group(0).lower()
+        if word in blocked:
+            continue
+        need = REQUIRES.get(word)
+        if need is not None and not need.search(headline):
             continue
         before = headline[max(0, m.start() - NEGATION_WINDOW):m.start()]
         if _NEG_RE.search(before):

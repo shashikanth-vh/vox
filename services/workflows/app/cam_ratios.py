@@ -23,22 +23,33 @@ from typing import Any
 # The base figures the dataset step must state per period (Rs. lakh), with what each
 # means — this text IS the contract the model is given.
 FIELDS: dict[str, str] = {
-    "net_sales": "net revenue from operations",
+    "net_sales": "net revenue from operations — ALL sales lines (domestic and export), "
+                 "the statement's sales group total, never one line of it",
     "cogs": "cost of goods sold / cost of materials consumed",
     "purchases": "purchases of stock-in-trade and materials (if stated)",
-    "pbdit": "profit before depreciation, interest and tax (EBITDA)",
+    "pbdit": "profit before depreciation, interest and tax (EBITDA) — for a firm, AFTER "
+             "partners' remuneration (salary, bonus, commission), on that same basis in "
+             "every period; interest to partners is interest",
+    "partners_remuneration": "partners' salary / remuneration / bonus / commission "
+                             "debited in the year (firms only; null for a company)",
+    "tax": "income tax expense for the year (current + deferred)",
     "depreciation": "depreciation and amortisation",
     "non_cash_charges": "other non-cash charges added back (if any)",
     "interest_total": "total interest / finance cost",
     "interest_term_debt": "interest on term debt only (if separable)",
     "principal_due": "scheduled principal repayments due in the year",
     "pat": "profit after tax",
-    "tnw": "tangible net worth (share capital + reserves)",
+    "tnw": "tangible net worth: share capital / partners' capital + reserves + the "
+           "year's profit not yet transferred (a Profit & Loss A/c balance on the "
+           "liabilities side is net worth, not a liability)",
     "intangibles": "intangible assets",
     "related_party_advances": "loans/advances to related parties",
     "group_investments": "investments in group companies",
-    "promoter_unsecured_loans": "unsecured loans from promoters/directors",
-    "term_debt": "term borrowings (long + current maturities)",
+    "promoter_unsecured_loans": "unsecured loans from promoters/directors/partners — ONLY "
+                                "where a document names them as the lender",
+    "term_debt": "term borrowings (long + current maturities), secured AND unsecured — an "
+                 "unsecured loan whose lender is not named is still debt: count it here "
+                 "and say so in the workpaper",
     "wc_debt": "working-capital bank borrowings",
     "total_outside_liabilities": "total outside liabilities",
     "current_assets": "total current assets",
@@ -394,7 +405,31 @@ def consistency(fig: Figures) -> list[str]:
         if ca is not None and parts and sum(parts) > ca + 0.5:
             out.append(f"Consistency {p.label}: receivables + inventory {sum(parts):g} exceed "
                        f"current assets {ca:g}")
+        # Current liabilities hold the creditors and the bank's WC line. Pulze's second
+        # draft locked FY26 current liabilities near 332 against 288 of creditors and a
+        # 179 CC, and called a 2.07 current ratio "healthy liquidity".
+        owed = [x for x in (p["trade_payables"], wc) if x is not None]
+        if cl is not None and len(owed) == 2 and sum(owed) > cl + 0.5:
+            out.append(f"Consistency {p.label}: trade payables + working-capital debt "
+                       f"{sum(owed):g} exceed current liabilities {cl:g}, which include both")
+        if before_remuneration(p):
+            out.append(f"Consistency {p.label}: PBDIT {pbdit:g} is before partners' "
+                       f"remuneration {p['partners_remuneration']:g} — PAT reconciles only "
+                       "with it deducted; restate PBDIT after it, as in every period")
     return out
+
+
+def before_remuneration(p: Period) -> bool:
+    """A firm's PBDIT struck before the partners' remuneration: PBDIT less depreciation,
+    interest and tax leaves PAT plus the remuneration. Pulze's second draft took FY24-25
+    PBDIT before it and FY26 after it, and read a margin fall into the mixed basis."""
+    r = p["partners_remuneration"]
+    need = (p["pbdit"], p["depreciation"], p["interest_total"], p["tax"], p["pat"])
+    if not r or r < 1 or any(x is None for x in need):
+        return False
+    pbdit, dep, interest, tax, pat = need
+    gap = pbdit - dep - interest - tax - pat  # type: ignore[operator]
+    return abs(gap - r) <= max(1.0, 0.02 * r) and abs(gap) > 1.0
 
 
 def _band(v: float, steps: list[tuple[float, str]], below: str) -> str:

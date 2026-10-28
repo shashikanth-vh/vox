@@ -26,6 +26,8 @@ export interface PanoramaLead {
 }
 
 export interface PanoramaLine {
+  /** Lending lines only: the line's id (the CAM workbench opens on it). */
+  id?: string;
   tracker_no: string | null; stage?: string | null; status?: string | null;
   amount_cr: number | null; pending_with?: string | null; rm: string | null;
   analyst?: string | null; stage_updated_at?: string | null;

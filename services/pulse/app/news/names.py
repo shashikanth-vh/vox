@@ -122,6 +122,16 @@ def too_common(name: str) -> bool:
     shorter word counts as common unless it is written as an acronym ("IPEC") or is
     plainly coined — a digit or a non-English letter ("3eco", "Savë")."""
     tokens = re.findall(r"[\w&']+", name or "")
+    if len(tokens) > 2:
+        # Three ordinary words together are a name: "Blue Power Motors" names a company,
+        # and no story prints the phrase by accident.
+        return False
+    if len(tokens) > 1:
+        # "Green Energy", "Sun Power": every word ordinary, so the name is a phrase a
+        # thousand stories print — "solar-power customers", "a site consultant
+        # indicted" (cipher-test, Oct 2026). An acronym or a coined word among
+        # them makes it a name.
+        return all(_ordinary(t) for t in tokens)
     if len(tokens) != 1:
         return False
     raw = tokens[0]
@@ -130,6 +140,25 @@ def too_common(name: str) -> bool:
         coined = raw.isupper() or not (raw.isalpha() and raw.isascii())
         return len(w) < 3 or not coined
     return w in _english() or w in _INDIA_COMMON or w in _SURNAMES or w in _GROUP_HOUSES
+
+
+# The everyday words that start a thousand company names. Deliberately short: the full
+# English dictionary would make "Concord Systems" ordinary, and it is a name.
+_EVERYDAY = frozenset("""
+future new best smart prime first modern national royal star sun bright united standard
+general classic super premier perfect quality supreme golden silver blue red city metro
+east west north south central life care home safe sure true pure fresh clean clear
+""".split())
+
+
+def _ordinary(raw: str) -> bool:
+    """A word that names no one in particular: a generic business word, an everyday
+    name-starter, a common Indian word or surname."""
+    w = raw.lower()
+    if raw.isupper() and len(raw) > 1 or not (raw.isalpha() and raw.isascii()):
+        return False                                   # an acronym, a coined spelling
+    return (w in GENERIC or w in _EVERYDAY or w in _INDIA_COMMON or w in _SURNAMES
+            or len(w) < 3)
 
 
 # A GROUP is searched whole. "Pashupati Group" shortened to "Pashupati" found a temple in
@@ -153,14 +182,20 @@ def short_name(trading: str) -> str | None:
     return core[0] if _distinctive(core[0]) else None
 
 
-def watch_names(trading: str, aliases: list[Any] | None = None) -> list[str]:
-    """Every name the firm is searched and recognised by: the analyst's names when
-    there are any, else the full name first and the automatic short name after it."""
+def watch_names(trading: str, aliases: list[Any] | None = None, legal: str = "") -> list[str]:
+    """Every name the firm is searched and recognised by, full names first: the trading
+    name, the legal name when it differs, the analyst's news names, then the automatic
+    short name. The analyst's names ADD to the full name — replacing it lost every
+    story printed under it (the desk, Oct 2026: "if not searched with the full name,
+    news is missing")."""
     full = (trading or "").strip()
     chosen = [str(a).strip() for a in (aliases or []) if str(a or "").strip()]
-    if not full and not chosen:
+    if not full and not chosen and not legal.strip():
         return []
-    names = chosen or [full, *[s for s in [short_name(full)] if s]]
+    # A full or legal name that is an everyday phrase names everyone ("Land", "Green
+    # Energy"): searched only when the analyst chose it.
+    names = [n for n in [full, legal.strip()] if n and not too_common(n)] + chosen
+    names += [s for s in [short_name(full)] if s]
     out: list[str] = []
     for n in names:
         if n.casefold() not in {o.casefold() for o in out}:

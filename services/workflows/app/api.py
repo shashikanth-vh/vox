@@ -146,6 +146,9 @@ _MAKER_ACTIONS: dict[str, tuple[dict[str, Any], ...]] = {
             "stages": {"Data Awaited", "Diligence", "Note Circulated"},
             "stage_reason": "The CAM is prepared before the committee decision — this "
                             "facility is already past that point.",
+            # An Admin may still open it at any stage — a CAM for a line already past
+            # the committee (a renewal, a re-look, a file being rebuilt) is their call.
+            "any_stage_roles": {"Admin"},
             # Selecting source documents + a prompt doc and reworking a draft is a
             # conversation, not a flat form — the client renders its own screen.
             "screen": "cam-workbench",
@@ -602,6 +605,8 @@ def _evaluate_action(action: dict[str, Any], *, roles: set[str], stage: str,
     if needed is not None and roles and not (roles & needed):
         return False, ("This step is done by " + ", ".join(sorted(needed)) + ".")
     stages = action.get("stages")
+    if roles & set(action.get("any_stage_roles") or ()):
+        stages = None
     if stages is not None and stage and stage not in stages:
         # A PARKED line gets the reopen instruction, not the spec's sequencing text.
         # "The CAM is prepared before the committee decision — this facility is already

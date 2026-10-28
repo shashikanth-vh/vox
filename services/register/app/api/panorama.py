@@ -595,7 +595,8 @@ async def company_panorama(
             "product_type": d.product_type, "rm": d.rm,
         } for d in deals],
         "lending": [{
-            "tracker_no": r.tracker_no, "stage": r.stage,
+            # The line's id: Company 360 opens the CAM workbench on it.
+            "id": str(r.id), "tracker_no": r.tracker_no, "stage": r.stage,
             "amount_cr": _num(r.amount_cr), "pending_with": r.pending_with,
             "rm": r.rm, "analyst": r.analyst,
             "stage_updated_at": _iso(r.stage_updated_at),

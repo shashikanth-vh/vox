@@ -83,9 +83,25 @@ class Settings(BaseServiceSettings):
     cam_pipeline_concurrency: int = 8
     # Reading a document into its fact sheet is extraction, not judgment: run at this
     # reasoning effort (Sarvam glm5.3: ~12 s a part at "low" against ~80–110 s at
-    # "high"). The dataset, sections and repairs keep the engine's own effort. Empty =
-    # the engine's effort everywhere.
+    # "high"). The dataset and sections keep the engine's own effort. Empty = the
+    # engine's effort everywhere.
     cam_digest_reasoning_effort: str = "low"
+    # A repair fixes named points in a sub-section already written — at this effort
+    # (53 repairs took 10 of the calls' minutes on Pulze at "high"). Empty = the engine's.
+    cam_repair_reasoning_effort: str = "low"
+    # The CAM harness. "v1": the model reads the fact sheets and writes every section,
+    # tables included. "v2": PRISM reads the known layouts itself (statements, net-worth
+    # forms, debt tables, bank limits, bureau rank) into a fact ledger, renders the
+    # tables that carry those figures, and the model writes around them — the weaker the
+    # engine, the more this matters. A draft request may ask for either.
+    cam_harness: str = "v1"
+    # v2's reviewer: "" = the CAM engine reviews its own parts; "provider:model" (as
+    # cam_engine) = a stronger engine for the few review calls only, the writing staying
+    # on the CAM engine.
+    cam_critic_engine: str = ""
+    # The credit rubric v2 sets signals from: "" = the packaged one (the CAM prompt's A3
+    # bands, app/cam_rubric.json); a path = the credit team's edited copy.
+    cam_rubric_path: str = ""
     # Where fact sheets are kept between runs and restarts (a volume in compose). Empty =
     # in memory only, so every deploy re-reads every document.
     cam_digest_cache_dir: str = ""
@@ -94,6 +110,10 @@ class Settings(BaseServiceSettings):
     # recommendation keep the engine's. Empty = the engine's effort everywhere.
     irg_section_reasoning_effort: str = "low"
     cam_call_budget_chars: int = 360_000
+    # v2: the fact sheets one sub-section (and its repair) reads, most relevant first —
+    # the locked dataset, ledger, findings and tables always go whole. 0 = the part's
+    # whole context on every call (~100k tokens each on a large file).
+    cam_sub_sheet_chars: int = 60_000
     cam_digest_part_chars: int = 90_000
 
     # Document extraction for the workbench. With docrag_url set, PDFs and spreadsheets
