@@ -360,6 +360,39 @@ async def test_an_unplaced_thread_waits_in_the_queue_and_a_person_places_it(tmp_
     assert stats["filed"] == 1 and stats["queued"] == 0
 
 
+async def test_a_refused_filing_is_counted_shown_and_retried_not_fatal(tmp_path):
+    """A Register (or model) refusal on one thread must not end the pass silently:
+    it is counted, its message is kept for the dialog, the thread is tried again on
+    the next passes, and the pass still records success and moves the history on."""
+    google = FakeGoogle("madhu@evamfinance.com", {"t1": ACME_THREAD})
+    google.added = ["t1"]
+    reg = FakeRegister([ACME])
+    calls = {"n": 0}
+
+    async def refusing(tenant, key, payload):
+        calls["n"] += 1
+        raise RuntimeError("422: attendees: value is not a valid list")
+
+    r = _reader(tmp_path, google, reg)
+    r._file = refusing
+    _connected(r, "madhu@evamfinance.com", history_id="100")
+    google.history_id = "101"
+    stats = await r.run_mailbox("EVAM", "madhu@evamfinance.com")
+    rec = r.store.mailbox("EVAM", "madhu@evamfinance.com")
+    assert stats["errors"] == 1 and stats["filed"] == 0
+    assert rec["last_ok"] and rec["error"] is None, "the pass itself succeeded"
+    assert rec["history_id"] == "101", "history moves on; the thread is kept on the retry list"
+    assert "422" in rec["last_error"]["error"] and rec["last_error"]["thread"] == "t1"
+    assert rec["retry"] == {"t1": 1}
+    # the next pass tries it again even though history has nothing new
+    await r.run_mailbox("EVAM", "madhu@evamfinance.com")
+    assert calls["n"] == 2 and rec["retry"] == {"t1": 2}
+    # once the Register accepts, it is filed and the retry entry goes
+    r._file = reg.file_fn
+    await r.run_mailbox("EVAM", "madhu@evamfinance.com")
+    assert len(reg.filed) == 1 and r.store.mailbox("EVAM", "madhu@evamfinance.com")["retry"] == {}
+
+
 async def test_ignored_conversations_stay_ignored(tmp_path):
     unknown = _thread("t7", _msg("v1", "x@random.org", "madhu@evamfinance.com", D0, "Hi", "Long time."))
     google = FakeGoogle("madhu@evamfinance.com", {"t7": unknown})

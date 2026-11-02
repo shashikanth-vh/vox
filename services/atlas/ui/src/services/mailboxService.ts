@@ -36,6 +36,7 @@ export interface MailboxStatus {
   backfill?: { done: boolean; pages: number; threads: number };
   counts?: { seen: number; filed: number; queued: number; errors: number; skipped: Record<string, number> };
   last_pass?: { seen: number; filed: number; queued: number; errors: number; note?: string; skipped: Record<string, number> };
+  last_error?: { at: number; thread: string | null; error: string } | null;
 }
 
 export interface QueueItem {

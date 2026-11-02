@@ -130,6 +130,11 @@ export default function MailboxDialog({ open, onClose }: { open: boolean; onClos
               </Typography>
             )}
             {st.last_pass?.note && <Typography sx={{ fontSize: 12.5, color: 'text.secondary' }}>{st.last_pass.note}</Typography>}
+            {st.last_error && (
+              <Typography sx={{ fontSize: 12.5, color: 'error.main' }}>
+                Last error ({when(st.last_error.at)}{st.last_error.thread ? ', one conversation' : ''}): {st.last_error.error}
+              </Typography>
+            )}
             <Typography sx={{ fontSize: 12.5, color: 'text.secondary' }}>
               Conversations the reader could not place on a company wait under Tools → Mail review queue.
             </Typography>

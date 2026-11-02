@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from app.mail.extract import ExtractError, Extractor
+from app.mail.extract import Extractor
 from app.mail.google import GoogleError, GoogleMail, TokenDeadError
 from app.mail.match import Firm, Match, match_thread
 from app.mail.store import MailStore
@@ -30,6 +30,7 @@ from app.mail.threads import PUBLIC_DOMAINS, Thread, parse_thread, skip_reason
 log = logging.getLogger("pulse.mail")
 
 INTERACTION_TYPE = "Email / Written Correspondence"
+RETRY_PASSES = 3               # a thread that fails is tried on this many passes
 FirmsFn = Callable[[str], Awaitable[list[Firm]]]
 SubjectFn = Callable[[str, str], Awaitable[tuple[str, str]]]
 FileFn = Callable[[str, str, dict[str, Any]], Awaitable[dict[str, Any]]]
@@ -161,14 +162,29 @@ class MailReader:
             if (not bf.get("done") or force_backfill) and rec.get("since"):
                 bf_ids = await self._backfill_page(access, rec, pages=self.config.backfill_pages_per_run)
                 thread_ids.extend(x for x in bf_ids if x not in thread_ids)
+            # 3. threads a previous pass could not finish (a model or Register refusal):
+            #    tried again, up to RETRY_PASSES times, before being let go.
+            retry = rec.setdefault("retry", {})
+            thread_ids.extend(t for t in list(retry) if t not in thread_ids)
             for tid in thread_ids[:budget]:
                 stats["seen"] += 1
                 try:
                     await self._one_thread(tenant, email, access, tid, firms, stats)
-                except (GoogleError, ExtractError, MailError) as exc:
+                    retry.pop(tid, None)
+                except TokenDeadError:
+                    raise
+                except Exception as exc:  # noqa: BLE001 - one thread never ends the pass
                     stats["errors"] += 1
-                    log.warning("pulse_mail_thread_failed", extra={"tenant": tenant, "mailbox": email,
-                                                                   "thread": tid, "error": str(exc)})
+                    why = f"{type(exc).__name__}: {exc}"[:300]
+                    rec["last_error"] = {"at": time.time(), "thread": tid, "error": why}
+                    n = int(retry.get(tid, 0)) + 1
+                    if n < RETRY_PASSES:
+                        retry[tid] = n
+                    else:
+                        retry.pop(tid, None)
+                    log.warning("pulse_mail_thread_failed",
+                                extra={"tenant": tenant, "mailbox": email, "thread_id": tid,
+                                       "attempt": n, "error": why})
             if len(thread_ids) > budget:
                 stats["note"] = f"{len(thread_ids) - budget} more threads wait for the next pass"
             if new_hist:
@@ -185,6 +201,13 @@ class MailReader:
             stats["errors"] += 1
             log.warning("pulse_mail_run_failed", extra={"tenant": tenant, "mailbox": email,
                                                         "error": str(exc)})
+        except Exception as exc:  # noqa: BLE001 - a pass that dies must say so, not vanish
+            why = f"{type(exc).__name__}: {exc}"[:300]
+            rec["error"] = f"The pass failed: {why}"
+            rec["last_error"] = {"at": time.time(), "thread": None, "error": why}
+            stats["errors"] += 1
+            log.exception("pulse_mail_pass_crashed", extra={"tenant": tenant, "mailbox": email,
+                                                            "error": why})
         finally:
             c = rec.setdefault("counts", {"seen": 0, "filed": 0, "queued": 0, "skipped": {}, "errors": 0})
             for k in ("seen", "filed", "queued", "errors"):
@@ -192,6 +215,10 @@ class MailReader:
             for why, n in stats["skipped"].items():
                 c.setdefault("skipped", {})[why] = c["skipped"].get(why, 0) + n
             rec["last_pass"] = stats
+            log.info("pulse_mail_pass", extra={"tenant": tenant, "mailbox": email, "seen": stats["seen"],
+                                               "filed": stats["filed"], "queued": stats["queued"],
+                                               "errors": stats["errors"], "skipped": stats["skipped"],
+                                               "ok": rec.get("error") is None})
             self.store.put_mailbox(tenant, email, rec)
             self.store.expire_queue(tenant, self.config.queue_days)
             with contextlib.suppress(Exception):
