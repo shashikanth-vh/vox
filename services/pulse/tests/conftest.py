@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import tempfile
 import time
 from collections.abc import AsyncIterator, Iterator
 
@@ -20,6 +21,12 @@ os.environ["PULSE_REGISTER_API_KEY"] = "test-key"
 os.environ["PULSE_REGISTER_TENANT"] = "EVAM"
 os.environ["PULSE_LOG_LEVEL"] = "WARNING"
 os.environ["PULSE_SOURCES"] = '[{"name": "sample", "kind": "sample"}]'
+# The mailbox reader: a throwaway store (the key file lands beside it) and no model.
+_MAIL_DIR = tempfile.mkdtemp(prefix="pulse-mail-")
+os.environ["PULSE_MAIL_FILE"] = os.path.join(_MAIL_DIR, "mail.json")
+os.environ["PULSE_MAIL_ENGINE"] = "stub"
+os.environ.setdefault("PULSE_GOOGLE_CLIENT_ID", "")
+os.environ.setdefault("PULSE_GOOGLE_CLIENT_SECRET", "")
 
 
 def _wait_healthy(port: int, timeout: float = 30.0) -> None:

@@ -83,6 +83,14 @@ def test_capability_routes_map_to_operations():
     # The monitor: a full scan spends the firm's Google allowance, so it is gated too.
     assert operation_for("GET", "/pulse/v1/news/monitor") == "run_news_scan"
     assert operation_for("POST", "/pulse/v1/news/monitor/scan") == "run_news_scan"
+    # The mailbox reader: placing a conversation files an interaction; coverage is
+    # the Employees master's; a person's own connection is theirs to manage.
+    assert operation_for("POST", "/pulse/v1/mail/queue/attach") == "log_interaction"
+    assert operation_for("POST", "/pulse/v1/mail/queue/ignore") == "log_interaction"
+    assert operation_for("GET", "/pulse/v1/mail/coverage") == "edit_employee"
+    assert operation_for("GET", "/pulse/v1/mail/me") is None
+    assert operation_for("POST", "/pulse/v1/mail/connect") is None
+    assert operation_for("GET", "/pulse/v1/mail/queue") is None
     assert operation_for("POST", "/orchestrator/v1/workflows/lead-conversions") == \
         "push_lead_to_deals"
     assert operation_for("POST", "/orchestrator/v1/workflows/abc123/approve") == \

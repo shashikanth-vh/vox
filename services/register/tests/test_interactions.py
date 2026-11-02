@@ -183,3 +183,28 @@ async def test_admin_removes_a_mislogged_interaction_and_the_lead_heals(client: 
     lead = (await client.get(f"/v1/leads/{lead_id}")).json()
     assert lead["last_interaction_date"] is None
     assert lead["next_action"] == "Board intro via Rakesh"
+
+
+async def test_an_older_interaction_never_moves_the_lead_backwards(client: AsyncClient):
+    """A mailbox backfill files threads from months ago. They belong on the timeline,
+    but the lead's last touch and the RM's current next action must not be rewound
+    to them — only an interaction at or after the last touch rolls up."""
+    lead_id = (await client.post("/v1/leads", json={"company": "Backfill Co"})).json()["id"]
+    assert (await client.post(f"/v1/leads/{lead_id}/interactions", json={
+        "interaction_type": "Phone Call", "occurred_at": "2026-09-20T10:00:00Z",
+        "next_action": "Share term sheet", "next_action_date": "2026-09-25"})).status_code == 201
+    assert (await client.post(f"/v1/leads/{lead_id}/interactions", json={
+        "interaction_type": "Email / Written Correspondence", "occurred_at": "2026-03-02T09:00:00Z",
+        "source": "Email", "source_ref": "gmail:t1:m1",
+        "next_action": "Old ask from March", "next_action_date": "2026-03-10"})).status_code == 201
+    lead = (await client.get(f"/v1/leads/{lead_id}")).json()
+    assert lead["last_interaction_date"] == "2026-09-20"
+    assert lead["next_action"] == "Share term sheet"
+    assert lead["next_action_date"] == "2026-09-25"
+    assert len((await client.get(f"/v1/leads/{lead_id}/interactions")).json()) == 2
+    # A newer one still rolls up as before.
+    assert (await client.post(f"/v1/leads/{lead_id}/interactions", json={
+        "interaction_type": "Email / Written Correspondence", "occurred_at": "2026-10-01T09:00:00Z",
+        "source": "Email", "next_action": "Send the CAM"})).status_code == 201
+    lead = (await client.get(f"/v1/leads/{lead_id}")).json()
+    assert lead["last_interaction_date"] == "2026-10-01" and lead["next_action"] == "Send the CAM"

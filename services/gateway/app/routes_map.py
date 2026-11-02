@@ -90,6 +90,13 @@ _RAW: list[tuple[str, str, str]] = [
     ("POST",   r"^/pulse/v1/news/schedules(/(delete|run|update))?$", "run_news_scan"),
     # The monitor: its coverage, and "Scan all now" / one firm's scan.
     ("POST",   r"^/pulse/v1/news/monitor/scan$", "run_news_scan"),
+    # The mailbox reader. A person's own connection (/mail/me, connect, disconnect,
+    # read-now) is unmapped on purpose: every signed-in person may manage their own
+    # mailbox, and PULSE checks the identity headers itself. Placing a queued
+    # conversation on a company files an interaction, so it takes that gate; the
+    # coverage page is the Employees master's concern.
+    ("POST",   r"^/pulse/v1/mail/queue/(attach|ignore)$", "log_interaction"),
+    ("GET",    r"^/pulse/v1/mail/coverage$", "edit_employee"),
     # DocRAG — uploaded documents (KYC, CIBIL consents, sanction letters) are the same
     # material the Data Register's document routes guard, so every data route — upload,
     # delete, read, and query (which returns document text) — needs the document grant.

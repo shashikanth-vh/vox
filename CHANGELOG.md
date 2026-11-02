@@ -6,6 +6,36 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **The mailbox reader: a person connects their work mailbox once, and every
+  conversation with a company becomes an interaction on that company's timeline.**
+  Opt-in per person. *My mailbox* in the account menu (and a one-time line on Today)
+  opens Google's consent screen for read-only Gmail; the code is exchanged on the
+  server and the token kept encrypted on the pulse volume. Every hour PULSE lists
+  what is new in each connected mailbox, keeps only conversations with an outside
+  party (internal mail, newsletters, automated senders and anything labelled
+  Private or HR are never read), attaches each to a company — by the domains on the
+  client master's new **E-mail domains** list, else by the company's name — reads
+  its meaning with the model (Claude, else Sarvam, else an offline stub) and files
+  ONE interaction per conversation, at the mail's own date, on the company's live
+  deal, else its active lead, else the company: summary, what was discussed,
+  decisions, asks, amounts and terms, the next step, one quote. A thread that grows
+  files its continuation; a flagged conversation (RED / AMBER / GREEN) also files an
+  intelligence row beside the News Radar's. Conversations the reader cannot place
+  wait under Tools → **Mail review queue**, where a person files them on a company
+  and can teach the Register the outside domain so the next one files itself.
+  Admin and Management see every mailbox's queue and a **Mailbox** column on
+  Employees. A token Google stops accepting (password reset, revoked app) stops
+  that mailbox and shows *Reconnect* to that person only.
+  * *Register:* `email_domains` on entities (migration 0031); an interaction dated
+    before a lead's last touch no longer moves the lead backwards or overwrites its
+    next action (a backfill adds history only).
+  * *Gateway:* placing a queued conversation takes the `log_interaction` gate;
+    coverage the `edit_employee` gate; a person's own connection is theirs.
+  *Operator:* set `GOOGLE_SSO_CLIENT_SECRET` in `.env` (the login button's OAuth
+  client; publish it as Internal), recreate `pulse`, `gateway`, `register`, `ui`.
+  Defaults: read hourly, 150 conversations a pass, `PULSE_MAIL_ENGINE=auto`. See
+  `docs/MAILBOX.md`.
+
 - **CAM: what the committee review of Pulze's third draft found PRISM let through.**
   - *Guarantors' net worth after their own bureau balances.* Each partner's personal
     bureau report ("Current" balances) is matched to their net-worth form by name.

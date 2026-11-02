@@ -84,6 +84,9 @@ class Entity(RegisterBase):
     # False takes the record out of the news digest (a placeholder, a place, a person
     # entered as a company). NULL = watched.
     news_watch: Mapped[bool | None] = mapped_column(Boolean)
+    # The domains the firm's people write from ("acmesolar.in"): the mailbox reader's
+    # first rule for attaching a conversation to this company (0031).
+    email_domains: Mapped[list | None] = mapped_column(JSONB)
 
 
 class Person(RegisterBase):

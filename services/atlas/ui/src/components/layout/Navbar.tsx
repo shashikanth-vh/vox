@@ -6,6 +6,8 @@ import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import NotificationsNoneIcon from '@mui/icons-material/NotificationsNone';
 import LogoutIcon from '@mui/icons-material/Logout';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
+import MailOutlineIcon from '@mui/icons-material/MailOutline';
+import MailboxDialog from '../mail/MailboxDialog';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -47,6 +49,7 @@ export default function Navbar() {
   }, []);
 
   const [menuEl, setMenuEl] = useState<null | HTMLElement>(null);
+  const [mailOpen, setMailOpen] = useState(false);
   const closeMenu = () => setMenuEl(null);
   const roleLabel = (role: string, name: string) => `${role} · ${name}`;
 
@@ -236,6 +239,11 @@ export default function Navbar() {
           <Typography sx={{ fontSize: 11.5, color: tokens.muted }}>{roleLabel(user.role, user.name)}</Typography>
         </Box>
         <Divider />
+        {/* The mailbox reader is opt-in per person: this is where a person connects,
+            checks or disconnects their own work mailbox. */}
+        <MenuItem onClick={() => { closeMenu(); setMailOpen(true); }} sx={{ fontSize: 12.5 }}>
+          <ListItemIcon sx={{ minWidth: 30 }}><MailOutlineIcon fontSize="small" /></ListItemIcon>My mailbox
+        </MenuItem>
         <MenuItem onClick={() => { referenceService.exportData(); closeMenu(); }} sx={{ fontSize: 12.5 }}>
           <ListItemIcon sx={{ minWidth: 30 }}><FileDownloadIcon fontSize="small" /></ListItemIcon>Export data
         </MenuItem>
@@ -249,6 +257,7 @@ export default function Navbar() {
           <ListItemIcon sx={{ minWidth: 30 }}><LogoutIcon fontSize="small" sx={{ color: tokens.bad }} /></ListItemIcon>Sign out
         </MenuItem>
       </Menu>
+      <MailboxDialog open={mailOpen} onClose={() => setMailOpen(false)} />
     </Box>
   );
 }

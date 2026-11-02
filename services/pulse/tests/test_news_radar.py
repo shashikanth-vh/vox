@@ -480,7 +480,10 @@ async def test_email_that_is_not_configured_is_not_retried(tmp_path):
         calls.append(s["id"])
         return False, "Email is not configured — set PULSE_SMTP_HOST", 3, 0
 
-    task = asyncio.create_task(sched.scheduler_loop(store, runner, tick_seconds=0))
+    # No early start here: with the default 90-minute lead, a test run between 06:30
+    # and 08:00 IST found the 8 o'clock slot "due" and ran the schedule a second time.
+    task = asyncio.create_task(sched.scheduler_loop(store, runner, tick_seconds=0,
+                                                    lead=lambda s: 0.0))
     await asyncio.sleep(0.02)
     store.add({"id": "S1", "tenant": "EVAM", "q": "Acme", "recipients": ["a@b.com"],
                "cadence": "daily", "hour": 8, "weekday": 0,

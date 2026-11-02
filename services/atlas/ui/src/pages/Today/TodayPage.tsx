@@ -10,6 +10,7 @@ import { useSearch } from '../../context/SearchContext';
 import CompanyDrawer from '../Deals/CompanyDrawer';
 import AddProductDialog from '../Deals/AddProductDialog';
 import WorkflowDecisionDialog from './WorkflowDecisionDialog';
+import MailboxBanner from '../../components/mail/MailboxBanner';
 import BookingReviewDialog from './BookingReviewDialog';
 import CovenantResultDialog from './CovenantResultDialog';
 import { computeToday, park, unpark } from './compute';
@@ -274,6 +275,7 @@ export default function TodayPage() {
 
   return (
     <Box sx={{ maxWidth: 900, mx: 'auto' }}>
+      <MailboxBanner />
       <Box sx={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 1, flexWrap: 'wrap', m: '4px 0' }}>
         <Typography sx={{ fontSize: 19, fontWeight: 700 }}>
           Good day, {user.name || 'there'} — {data.reds} red, {data.ambers} amber{mine ? ' on your book' : ''}

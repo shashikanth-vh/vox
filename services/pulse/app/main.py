@@ -41,6 +41,11 @@ from fastapi.responses import ORJSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import Settings, get_settings
+from app.mail import reader as mailr
+from app.mail.extract import ExtractError, Extractor
+from app.mail.google import GoogleError, GoogleMail, NotConfiguredError
+from app.mail.match import Firm, firm_from_row
+from app.mail.store import MailStore
 from app.matching import WatchEntity, classify_signal, match_entities
 from app.news import monitor as mon
 from app.news import schedules as sched
@@ -196,6 +201,20 @@ def create_app() -> FastAPI:
         if settings.monitor_enabled:
             app.state.monitor_task = asyncio.create_task(
                 app.state.monitor.loop(tick_seconds=settings.scheduler_tick_s))
+        # The mailbox reader: opt-in per person, read every hour, filed into the Register.
+        app.state.mail_store = MailStore(settings.mail_file, settings.mail_token_key)
+        app.state.google_mail = GoogleMail(settings.google_client_id, settings.google_client_secret)
+        app.state.mail_extractor = Extractor(settings.mail_engine, anthropic_key=settings.anthropic_api_key,
+                                             sarvam_key=settings.sarvam_api_key,
+                                             sarvam_base_url=settings.sarvam_base_url)
+        app.state.mail_reader = mailr.MailReader(
+            app.state.mail_store, app.state.google_mail, app.state.mail_extractor,
+            _mail_firms, _mail_subject, _mail_file, _mail_intel,
+            settings.mail_config(), settings.mail_tenant_list(), add_domain=_mail_add_domain)
+        app.state.mail_task = None
+        if settings.mail_enabled:
+            app.state.mail_task = asyncio.create_task(
+                app.state.mail_reader.loop(tick_seconds=settings.scheduler_tick_s))
         app.state.scheduler_task = None
         if settings.scheduler_enabled:
             app.state.scheduler_task = asyncio.create_task(
@@ -208,13 +227,17 @@ def create_app() -> FastAPI:
             "email": settings.smtp().ready, "gdelt": not settings.disable_gdelt,
             "schedules": len(app.state.schedules.all()), "store_writable": writable})
         yield
-        for task in (app.state.scheduler_task, app.state.monitor_task,
+        for task in (app.state.scheduler_task, app.state.monitor_task, app.state.mail_task,
                      *app.state.monitor.running.values()):
             if task is not None:
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
         app.state.monitor_store.save()
+        with contextlib.suppress(Exception):
+            app.state.mail_store.save()
+        await app.state.google_mail.aclose()
+        await app.state.mail_extractor.aclose()
         for client in app.state.register_clients.values():
             await client.aclose()
         # The engine's own upstream pool holds keep-alive sockets to the news sources.
@@ -921,6 +944,205 @@ def create_app() -> FastAPI:
             "ok": True, "started": True,
             "message": "Scanning every firm in the background, paced to what Google "
                        "allows; findings appear as they are filed."})
+
+    # ------------------------------------------------------------------ the mailbox reader
+    async def _mail_firms(tenant: str) -> list[Firm]:
+        """The tenant's companies as the matcher needs them: names, aliases and the
+        e-mail domains their people write from."""
+        client = _tenant_client(app, tenant)
+        firms: list[Firm] = []
+        async for row in client.iterate("entities", page_size=200):
+            f = firm_from_row(row)
+            if f is not None:
+                firms.append(f)
+            if len(firms) >= settings.watchlist_max_entities:
+                break
+        return firms
+
+    async def _mail_subject(tenant: str, entity_id: str) -> tuple[str, str]:
+        """Where a conversation files: the company's live deal, else its active lead,
+        else the company itself — the same order the website intake uses."""
+        client = _tenant_client(app, tenant)
+        with contextlib.suppress(RegisterError):
+            async for deal in client.iterate("deals", page_size=50, entity_id=entity_id):
+                stage = str(deal.get("stage") or "").lower()
+                if not any(w in stage for w in ("closed", "lost", "dropped", "dead", "declined")):
+                    return "Deal", str(deal["id"])
+        with contextlib.suppress(RegisterError):
+            async for lead in client.iterate("leads", page_size=50, entity_id=entity_id, status="Active"):
+                return "Lead", str(lead["id"])
+        return "Entity", entity_id
+
+    async def _mail_file(tenant: str, key: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return await _tenant_client(app, tenant).create("interactions", payload, idempotency_key=key)
+
+    async def _mail_intel(tenant: str, key: str, row: dict[str, Any]) -> Any:
+        return await _tenant_client(app, tenant).create("external-intelligence", row, idempotency_key=key)
+
+    async def _mail_add_domain(tenant: str, entity_id: str, domain: str) -> None:
+        client = _tenant_client(app, tenant)
+        ent = await client.get("entities", entity_id)
+        domains = [str(d) for d in (ent.get("email_domains") or [])]
+        if domain not in domains:
+            await client.update("entities", entity_id,
+                                {"email_domains": [*domains, domain][:12]},
+                                expected_version=ent.get("row_version"))
+
+    def _caller(request: Request) -> tuple[str, set[str]]:
+        """The signed-in person, as the gateway states it. PULSE sits behind the
+        gateway (its own API key), so these headers are the gateway's word."""
+        email = (request.headers.get("X-User-Email") or "").strip().lower()
+        roles = {r.strip() for r in (request.headers.get("X-User-Roles") or "").split(",") if r.strip()}
+        return email, roles
+
+    def _oversees(roles: set[str]) -> bool:
+        return bool(roles & {"Admin", "Management"})
+
+    def _mail_refused(exc: Exception) -> ORJSONResponse:
+        status = 503 if isinstance(exc, NotConfiguredError) else 400
+        return ORJSONResponse(status_code=status, content={"ok": False, "message": str(exc)})
+
+    @app.get("/v1/mail/me", tags=["Mailbox"], summary="The caller's mailbox connection")
+    async def mail_me(request: Request, tenant: str = Depends(tenant_of),
+                      x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> Any:
+        if (denied := _require_api_key(settings, x_api_key)) is not None:
+            return denied
+        email, _ = _caller(request)
+        if not email:
+            return ORJSONResponse(status_code=401, content={"ok": False, "message": "Sign in first."})
+        out = request.app.state.mail_reader.status(tenant, email)
+        out["enabled"] = settings.mail_enabled
+        out["client_id"] = settings.google_client_id
+        return out
+
+    @app.post("/v1/mail/connect", tags=["Mailbox"],
+              summary="Connect the caller's mailbox with the code from Google's consent screen")
+    async def mail_connect(payload: dict, request: Request, tenant: str = Depends(tenant_of),
+                           x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> Any:
+        """``{"code": …, "since_months": 12, "name": "…"}``. The code comes from the GIS
+        popup; it is exchanged here, and the token is accepted only if it opens the
+        mailbox of the person signed in. The first pass starts in the background."""
+        if (denied := _require_api_key(settings, x_api_key)) is not None:
+            return denied
+        email, _ = _caller(request)
+        if not email:
+            return ORJSONResponse(status_code=401, content={"ok": False, "message": "Sign in first."})
+        if not settings.mail_enabled:
+            return ORJSONResponse(status_code=503, content={
+                "ok": False, "message": "The mailbox reader is off on this server."})
+        code = str(payload.get("code") or "").strip()
+        if not code:
+            return ORJSONResponse(status_code=422, content={"ok": False, "message": "No consent code."})
+        reader: mailr.MailReader = request.app.state.mail_reader
+        try:
+            status = await reader.connect(tenant, email, code,
+                                          since_months=int(payload.get("since_months") or 12),
+                                          display_name=str(payload.get("name") or ""))
+        except (GoogleError, mailr.MailError, ValueError) as exc:
+            return _mail_refused(exc)
+        task = asyncio.create_task(reader.run_mailbox(tenant, email))
+        request.app.state.background_runs.add(task)
+        task.add_done_callback(request.app.state.background_runs.discard)
+        return {"ok": True, **status}
+
+    @app.post("/v1/mail/disconnect", tags=["Mailbox"], summary="Forget the caller's mailbox token")
+    async def mail_disconnect(request: Request, tenant: str = Depends(tenant_of),
+                              x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> Any:
+        if (denied := _require_api_key(settings, x_api_key)) is not None:
+            return denied
+        email, _ = _caller(request)
+        if not email:
+            return ORJSONResponse(status_code=401, content={"ok": False, "message": "Sign in first."})
+        return {"ok": True, "disconnected": request.app.state.mail_reader.disconnect(tenant, email)}
+
+    @app.post("/v1/mail/read-now", tags=["Mailbox"], summary="Read the caller's mailbox now (background)")
+    async def mail_read_now(request: Request, tenant: str = Depends(tenant_of),
+                            x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> Any:
+        if (denied := _require_api_key(settings, x_api_key)) is not None:
+            return denied
+        email, _ = _caller(request)
+        if not email:
+            return ORJSONResponse(status_code=401, content={"ok": False, "message": "Sign in first."})
+        reader: mailr.MailReader = request.app.state.mail_reader
+        if reader.store.mailbox(tenant, email) is None:
+            return ORJSONResponse(status_code=404, content={"ok": False, "message": "Mailbox not connected."})
+        task = asyncio.create_task(reader.run_mailbox(tenant, email))
+        request.app.state.background_runs.add(task)
+        task.add_done_callback(request.app.state.background_runs.discard)
+        return ORJSONResponse(status_code=202, content={"ok": True, "started": True})
+
+    @app.get("/v1/mail/queue", tags=["Mailbox"],
+             summary="Conversations waiting for a person to place them on a company")
+    async def mail_queue(request: Request, tenant: str = Depends(tenant_of),
+                         x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> Any:
+        """The caller's own mailbox's items; Admin and Management see every mailbox's."""
+        if (denied := _require_api_key(settings, x_api_key)) is not None:
+            return denied
+        email, roles = _caller(request)
+        if not email:
+            return ORJSONResponse(status_code=401, content={"ok": False, "message": "Sign in first."})
+        reader: mailr.MailReader = request.app.state.mail_reader
+        items = reader.queue(tenant, mailbox=None if _oversees(roles) else email)
+        return {"items": items, "total": len(items)}
+
+    @app.post("/v1/mail/queue/attach", tags=["Mailbox"], summary="Place a queued conversation on a company")
+    async def mail_attach(payload: dict, request: Request, tenant: str = Depends(tenant_of),
+                          x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> Any:
+        """``{"key": …, "entity_id": …, "add_domain": true}`` files it now; ``add_domain``
+        teaches the Register the outside domain so the next conversation files itself."""
+        if (denied := _require_api_key(settings, x_api_key)) is not None:
+            return denied
+        email, roles = _caller(request)
+        if not email:
+            return ORJSONResponse(status_code=401, content={"ok": False, "message": "Sign in first."})
+        reader: mailr.MailReader = request.app.state.mail_reader
+        key = str(payload.get("key") or "")
+        entry = reader.store.queue(tenant).get(key)
+        if entry is None:
+            return ORJSONResponse(status_code=404, content={
+                "ok": False, "message": "Not in the queue any more."})
+        if entry.get("mailbox") != email and not _oversees(roles):
+            return ORJSONResponse(status_code=403, content={
+                "ok": False, "message": "Not your mailbox's conversation."})
+        try:
+            row = await reader.attach(tenant, key, str(payload.get("entity_id") or ""), by=email,
+                                      add_domain=bool(payload.get("add_domain")))
+        except (GoogleError, ExtractError, mailr.MailError, RegisterError) as exc:
+            return _mail_refused(exc)
+        return {"ok": True, "interaction_id": row.get("id"), "subject_type": row.get("subject_type"),
+                "subject_id": row.get("subject_id")}
+
+    @app.post("/v1/mail/queue/ignore", tags=["Mailbox"], summary="Drop a queued conversation for good")
+    async def mail_ignore(payload: dict, request: Request, tenant: str = Depends(tenant_of),
+                          x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> Any:
+        if (denied := _require_api_key(settings, x_api_key)) is not None:
+            return denied
+        email, roles = _caller(request)
+        if not email:
+            return ORJSONResponse(status_code=401, content={"ok": False, "message": "Sign in first."})
+        reader: mailr.MailReader = request.app.state.mail_reader
+        key = str(payload.get("key") or "")
+        entry = reader.store.queue(tenant).get(key)
+        if entry is not None and entry.get("mailbox") != email and not _oversees(roles):
+            return ORJSONResponse(status_code=403, content={
+                "ok": False, "message": "Not your mailbox's conversation."})
+        return {"ok": True, "ignored": reader.ignore(tenant, key)}
+
+    @app.get("/v1/mail/coverage", tags=["Mailbox"], summary="Admin: every connected mailbox and its state")
+    async def mail_coverage(request: Request, tenant: str = Depends(tenant_of),
+                            x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> Any:
+        if (denied := _require_api_key(settings, x_api_key)) is not None:
+            return denied
+        _, roles = _caller(request)
+        if not _oversees(roles):
+            return ORJSONResponse(status_code=403, content={
+                "ok": False, "message": "Admin or Management only."})
+        reader: mailr.MailReader = request.app.state.mail_reader
+        writable, why = reader.store.probe()
+        return {"items": reader.coverage(tenant), "enabled": settings.mail_enabled,
+                "configured": reader.google.configured, "engine": reader.extractor.engine,
+                "store_ok": writable, "store_error": why,
+                "queue": len(reader.store.queue(tenant))}
 
     return app
 

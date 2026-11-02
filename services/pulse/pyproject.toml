@@ -18,6 +18,8 @@ dependencies = [
     # zoneinfo's fallback database: slim images may lack system tzdata, and the
     # digest scheduler speaks the DESK's timezone (PULSE_DIGEST_TZ), not UTC.
     "tzdata==2024.2",
+    # The mailbox reader keeps each person's Google token encrypted at rest.
+    "cryptography>=42,<51",
 ]
 
 [project.optional-dependencies]

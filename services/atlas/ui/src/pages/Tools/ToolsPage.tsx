@@ -6,6 +6,7 @@ import { can } from '../../auth/rbac';
 import { newsService } from '../../services/newsService';
 import ExportBar from '../../components/common/ExportBar';
 import NewsRadar from './NewsRadar';
+import MailQueue from './MailQueue';
 import LedgerDialog from './LedgerDialog';
 import ProspectsDialog from './ProspectsDialog';
 
@@ -48,6 +49,7 @@ export default function ToolsPage() {
   const [ledger, setLedger] = useState(false);
   const [prospects, setProspects] = useState(false);
   const radarRef = useRef<HTMLDivElement>(null);
+  const queueRef = useRef<HTMLDivElement>(null);
   // The Excel ledger is Admin-only in both directions — the server enforces it too, so
   // hiding it here only spares a non-Admin a refusal they could not act on.
   const canLedger = can(user.roles, 'backupRestore');
@@ -84,9 +86,17 @@ export default function ToolsPage() {
             sub="import market lists · export the universe"
             onClick={() => setProspects(true)} />
         )}
+        <ToolCard icon="✉️" title="Mail review queue"
+          sub="conversations waiting for a company"
+          onClick={() => queueRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })} />
       </Box>
 
       <Box ref={radarRef}><NewsRadar /></Box>
+
+      <Box ref={queueRef} sx={{ mt: 3 }}>
+        <Typography sx={{ fontSize: 15, fontWeight: 700, mb: 0.5 }}>Mail review queue</Typography>
+        <MailQueue />
+      </Box>
 
       <LedgerDialog open={ledger} onClose={() => setLedger(false)} />
       <ProspectsDialog open={prospects} onClose={() => setProspects(false)} />

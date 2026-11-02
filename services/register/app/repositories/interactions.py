@@ -113,16 +113,22 @@ async def create_interaction(
                 .values(chased_date=tenant_date(obj.occurred_at), last_chase_note=said)
             )
 
-    # Roll the latest interaction onto the parent lead's summary fields.
+    # Roll the latest interaction onto the parent lead's summary fields — the LATEST:
+    # an interaction dated before the lead's last touch (a mailbox backfill, a note
+    # logged late) adds history and leaves the summary alone, so an old thread never
+    # moves last-touch backwards or overwrites the RM's current next action.
     if stype == "Lead":
-        vals: dict = {"last_interaction_date": tenant_date(obj.occurred_at)}
-        if data.get("next_action"):
-            vals["next_action"] = data["next_action"]
-        if data.get("next_action_date"):
-            vals["next_action_date"] = data["next_action_date"]
-        await session.execute(
-            update(Lead).where(Lead.id == sid, Lead.tenant_id == tenant_id).values(**vals)
-        )
+        when = tenant_date(obj.occurred_at)
+        last = getattr(subject, "last_interaction_date", None)
+        if last is None or when >= last:
+            vals: dict = {"last_interaction_date": when}
+            if data.get("next_action"):
+                vals["next_action"] = data["next_action"]
+            if data.get("next_action_date"):
+                vals["next_action_date"] = data["next_action_date"]
+            await session.execute(
+                update(Lead).where(Lead.id == sid, Lead.tenant_id == tenant_id).values(**vals)
+            )
 
     return obj
 

@@ -468,6 +468,26 @@ services:
       PULSE_OFFICIAL_SEBI: "${PULSE_OFFICIAL_SEBI:-true}"
       PULSE_OFFICIAL_IBBI: "${PULSE_OFFICIAL_IBBI:-true}"
       PULSE_OFFICIAL_NSE: "${PULSE_OFFICIAL_NSE:-true}"
+      # The mailbox reader (opt-in per person): a person connects their work mailbox
+      # once; it is read every hour and each conversation with a company becomes an
+      # interaction on that company's timeline. The Google OAuth client is the login
+      # button's (GOOGLE_SSO_CLIENT_ID); its SECRET is new, in deploy/compose/.env.
+      # Tokens are encrypted at rest; the key lives on the pulsedata volume unless
+      # PULSE_MAIL_TOKEN_KEY is set. The model is Claude when ANTHROPIC_API_KEY is
+      # set, else Sarvam, else an offline stub (PULSE_MAIL_ENGINE=provider:model
+      # overrides).
+      PULSE_MAIL_ENABLED: "${PULSE_MAIL_ENABLED:-true}"
+      PULSE_MAIL_FILE: "/data/pulse/mail.json"
+      PULSE_MAIL_TOKEN_KEY: "${PULSE_MAIL_TOKEN_KEY:-}"
+      PULSE_GOOGLE_CLIENT_ID: "${GOOGLE_SSO_CLIENT_ID:-}"
+      PULSE_GOOGLE_CLIENT_SECRET: "${GOOGLE_SSO_CLIENT_SECRET:-}"
+      PULSE_MAIL_ENGINE: "${PULSE_MAIL_ENGINE:-auto}"
+      PULSE_ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      PULSE_SARVAM_API_KEY: "${SARVAM_API_KEY:-}"
+      PULSE_MAIL_INTERVAL_S: "${PULSE_MAIL_INTERVAL_S:-3600}"
+      PULSE_MAIL_MAX_THREADS_PER_RUN: "${PULSE_MAIL_MAX_THREADS_PER_RUN:-150}"
+      PULSE_MAIL_INTERNAL_DOMAINS: "${PULSE_MAIL_INTERNAL_DOMAINS:-evamfinance.com}"
+      PULSE_MAIL_EXCLUDE_LABELS: "${PULSE_MAIL_EXCLUDE_LABELS:-Private,HR}"
     volumes:
       - pulsedata:/data/pulse
     # No host port: PULSE is reachable ONLY through the gateway (edge → /pulse/...).

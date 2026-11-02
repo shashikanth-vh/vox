@@ -76,3 +76,11 @@ podSecurityContext:
 nodeSelector: {}
 tolerations: []
 affinity: {}
+
+# The mailbox reader (opt-in per person). The Google client SECRET, the model keys and
+# PULSE_MAIL_TOKEN_KEY are secrets: supply them through the chart's secret, not here.
+mail:
+  enabled: true
+  engine: auto            # auto | anthropic:<model> | sarvam:<model> | stub
+  internalDomains: evamfinance.com
+  googleClientId: ""

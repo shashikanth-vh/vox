@@ -75,6 +75,15 @@ NewsAlias = Annotated[str, StringConstraints(strip_whitespace=True, min_length=3
                                              max_length=120, pattern=r"[A-Za-z]")]
 
 
+# An e-mail domain the firm's people write from: "acmesolar.in". Stored lower-cased and
+# trimmed; no "@", no scheme — a bare registrable domain with at least one dot. (The
+# pattern tolerates case and edge spaces because pydantic checks it before the
+# strip / lower normalisation applies.)
+EmailDomain = Annotated[str, StringConstraints(strip_whitespace=True, to_lower=True,
+                                               min_length=4, max_length=120,
+                                               pattern=r"^\s*[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z]{2,}\s*$")]
+
+
 class KeyPerson(BaseModel):
     """A director or promoter the desk watches in the news. ``city`` narrows a common
     name ("Pranav Kumar") to the one who runs this company."""
@@ -112,6 +121,7 @@ class EntityCreate(CreateModel):
     key_people: list[KeyPerson] | None = Field(default=None, max_length=20)
     news_aliases: list[NewsAlias] | None = Field(default=None, max_length=8)
     news_watch: bool | None = None
+    email_domains: list[EmailDomain] | None = Field(default=None, max_length=12)
 
 
 class EntityUpdate(UpdateModel):
@@ -140,6 +150,7 @@ class EntityUpdate(UpdateModel):
     key_people: list[KeyPerson] | None = Field(default=None, max_length=20)
     news_aliases: list[NewsAlias] | None = Field(default=None, max_length=8)
     news_watch: bool | None = None
+    email_domains: list[EmailDomain] | None = Field(default=None, max_length=12)
 
 
 class EntityRead(ReadModel):
@@ -168,6 +179,7 @@ class EntityRead(ReadModel):
     key_people: list[dict[str, Any]] | None = None
     news_aliases: list[str] | None = None
     news_watch: bool | None = None
+    email_domains: list[str] | None = None
 
 
 # --------------------------------------------------------------------------- #

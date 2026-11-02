@@ -4,12 +4,13 @@ import AddIcon from '@mui/icons-material/Add';
 import TableRowsIcon from '@mui/icons-material/TableRows';
 import GridViewIcon from '@mui/icons-material/GridView';
 import { useNavigate } from 'react-router-dom';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { MRT_ColumnDef } from 'material-react-table';
 import CommonTable from '../../components/table/CommonTable';
 import EmployeeDialog from './EmployeeDialog';
 import EmployeeCards from './EmployeeCards';
 import { employeesService } from '../../services/employeesService';
+import { mailboxService, type MailboxStatus } from '../../services/mailboxService';
 import { useAuth } from '../../auth/AuthContext';
 import { can } from '../../auth/rbac';
 import ExportBar, { toCsv, saveCsv } from '../../components/common/ExportBar';
@@ -32,6 +33,15 @@ export default function EmployeesPage({ mode: modeProp, onModeChange }: { mode?:
   const [dialog, setDialog] = useState<{ mode: 'add' | 'edit'; emp: Employee | null } | null>(null);
   const [del, setDel] = useState<Employee | null>(null);
   const refresh = () => qc.invalidateQueries({ queryKey: ['employees'] });
+  // Who has connected their mailbox (the reader is opt-in): one call for the grid,
+  // only for those who may edit employees — the same people the coverage route admits.
+  const { data: coverage } = useQuery({
+    queryKey: ['mailbox', 'coverage'],
+    queryFn: async () => { const r = await mailboxService.coverage(); return r.ok ? r.data : null; },
+    enabled: !ro, staleTime: 60_000, retry: false,
+  });
+  const mailboxOf = (email?: string): MailboxStatus | undefined =>
+    coverage?.items.find((m) => m.email === (email || '').toLowerCase());
 
   // Reconcile the roster from Access on open: a user provisioned through Postman (or
   // any path that never wrote the people table) becomes a roster row — and therefore
@@ -86,6 +96,13 @@ export default function EmployeesPage({ mode: modeProp, onModeChange }: { mode?:
       accessorFn: (r: any) => (r.enquiryApprover ? 'Yes' : 'No'),
       Cell: ({ cell }) => cell.getValue<string>() === 'Yes'
         ? <Chip size="small" label="Approver" color="primary" variant="outlined" /> : <span style={{ color: 'var(--mui-palette-text-disabled)' }}>—</span> },
+    ...(!ro && coverage ? [{
+      id: 'mailbox', header: 'Mailbox', size: 130, meta: { localFilter: true },
+      accessorFn: (r: any) => { const m = mailboxOf(r.email); return !m?.connected ? 'Not connected' : m.status === 'reconnect' ? 'Needs reconnect' : m.status === 'backfill' ? 'Reading history' : 'Connected'; },
+      Cell: ({ cell }: any) => { const v = String(cell.getValue() ?? ''); return v === 'Not connected'
+        ? <span style={{ color: 'var(--mui-palette-text-disabled)' }}>—</span>
+        : <Chip size="small" label={v} color={v === 'Needs reconnect' ? 'error' : v === 'Reading history' ? 'warning' : 'success'} variant="outlined" />; },
+    } as MRT_ColumnDef<Employee>] : []),
     { id: 'inactive', header: 'Status', size: 100, meta: { localFilter: true },
       accessorFn: (r: any) => (r.inactive ? 'Inactive' : 'Active'),
       Cell: ({ cell }) => <Chip size="small" label={cell.getValue<string>()} color={cell.getValue() === 'Inactive' ? 'default' : 'success'} variant="outlined" /> },
@@ -94,7 +111,7 @@ export default function EmployeesPage({ mode: modeProp, onModeChange }: { mode?:
       muiTableHeadCellProps: { align: 'right' }, muiTableBodyCellProps: { align: 'right' },
       Cell: ({ row }) => <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{employeesService.bookRollup(row.original.name).total}</span>,
     },
-  ], []);
+  ], [ro, coverage]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   const addBtn = !ro && <Button startIcon={<AddIcon />} variant="contained" onClick={() => setDialog({ mode: 'add', emp: null })}>Add employee</Button>;
 

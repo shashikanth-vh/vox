@@ -325,6 +325,7 @@ async def test_entity_create_field_names_are_pinned(client: AsyncClient):
         "sector", "sub_sector", "lens", "state", "location", "city", "country", "address",
         "register_status", "lifecycle", "promoter_group_code", "about", "toi", "notes", "tags",
         "key_people", "news_aliases", "news_watch",   # News Radar (0030)
+        "email_domains",                               # mailbox reader (0031)
     }
     # And the body the orchestrator actually sends is accepted.
     r = await client.post("/v1/entities", json={
@@ -427,3 +428,20 @@ async def test_ref_seeding_reconciles_instead_of_only_adding(client: AsyncClient
 
         await session.execute(RefValue.__table__.delete())
         await session.commit()
+
+
+async def test_entity_email_domains_roundtrip_and_validation(client: AsyncClient):
+    """The domains a firm's people write from: lower-cased bare domains, a short list.
+    The mailbox reader attaches conversations by them (0031)."""
+    r = await client.post("/v1/entities", json={
+        "code": f"MAIL-{uuid.uuid4().hex[:6]}", "legal_name": "Acme Solar Pvt Ltd",
+        "email_domains": [" AcmeSolar.in ", "acme-renewables.com"]})
+    assert r.status_code == 201, r.text
+    assert r.json()["email_domains"] == ["acmesolar.in", "acme-renewables.com"]
+    eid = r.json()["id"]
+    assert (await client.patch(f"/v1/entities/{eid}", json={"email_domains": None})).status_code == 200
+    assert (await client.get(f"/v1/entities/{eid}")).json()["email_domains"] is None
+    bad = await client.post("/v1/entities", json={
+        "code": f"MAIL-{uuid.uuid4().hex[:6]}", "legal_name": "Bad Domains",
+        "email_domains": ["ravi@acmesolar.in"]})
+    assert bad.status_code == 422, "an address is not a domain"

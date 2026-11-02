@@ -91,3 +91,31 @@ export function tokenSecondsLeft(idToken: string | undefined | null): number | n
     return Number(payload.exp) - Math.floor(Date.now() / 1000);
   } catch { return null; }
 }
+
+/**
+ * The Gmail read-only consent for the mailbox reader (opt-in per person). Opens
+ * Google's popup with the code client; the one-time authorization CODE comes back and
+ * is posted to PRISM, which exchanges it on the server with the client secret. The
+ * browser never sees a Gmail token. `prompt: 'consent'` makes Google issue a refresh
+ * token every time, so a reconnect after a revoke works too.
+ */
+export async function requestGmailCode(clientId: string, loginHint?: string): Promise<string> {
+  await loadGis();
+  const oauth2 = (window as any).google?.accounts?.oauth2;
+  if (!oauth2?.initCodeClient) throw new Error('Google sign-in did not load the OAuth client.');
+  return new Promise((resolve, reject) => {
+    const client = oauth2.initCodeClient({
+      client_id: clientId,
+      scope: 'https://www.googleapis.com/auth/gmail.readonly',
+      ux_mode: 'popup',
+      select_account: false,
+      ...(loginHint ? { login_hint: loginHint, hint: loginHint } : {}),
+      callback: (r: any) => {
+        if (r?.code) resolve(String(r.code));
+        else reject(new Error(r?.error_description || r?.error || 'No code came back from Google.'));
+      },
+      error_callback: (e: any) => reject(new Error(e?.message || e?.type || 'The Google window was closed.')),
+    });
+    client.requestCode();
+  });
+}

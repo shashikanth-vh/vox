@@ -101,6 +101,33 @@ class Settings(BaseSettings):
     # Off = the old behaviour: the digest searches everything before it sends.
     monitor_enabled: bool = True
     monitor_file: str = "/data/pulse/monitor.json"
+
+    # ---- The mailbox reader (opt-in per person) ------------------------------------
+    # Off = no Connect button works and no mailbox is read. The Google OAuth client is
+    # the same one the login button uses (GOOGLE_SSO_CLIENT_ID); its SECRET is new and
+    # lives only in deploy/compose/.env. Tokens are encrypted at rest with
+    # PULSE_MAIL_TOKEN_KEY (a Fernet key); blank = a key file generated next to the
+    # store on the data volume.
+    mail_enabled: bool = True
+    mail_file: str = "/data/pulse/mail.json"
+    mail_token_key: str = ""
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    # The model that reads a conversation: "auto" = Claude if ANTHROPIC key is set,
+    # else Sarvam if its key is set, else the offline stub (subject + latest message).
+    mail_engine: str = "auto"
+    anthropic_api_key: str = ""
+    sarvam_api_key: str = ""
+    sarvam_base_url: str = "https://api.sarvam.ai/v1"
+    mail_interval_s: int = 3600          # each connected mailbox is read this often
+    mail_max_threads_per_run: int = 150  # per mailbox per pass; the rest wait an hour
+    mail_backfill_pages_per_run: int = 3 # 100 threads a page, oldest first
+    mail_internal_domains: str = "evamfinance.com"
+    mail_exclude_labels: str = "Private,HR"
+    mail_min_confidence: float = 0.6
+    mail_queue_days: int = 60
+    mail_engine_concurrency: int = 4
+    mail_tenants: str = ""               # blank = the register tenant
     # Tenants the monitor covers (comma-separated); blank = PULSE_REGISTER_TENANT.
     monitor_tenants: str = ""
     # Google searches the monitor may spend an hour. Google allows a cloud host ~450;
@@ -203,6 +230,21 @@ class Settings(BaseSettings):
                                                               "using": default})
             return default
         return cleaned
+
+    def mail_tenant_list(self) -> list[str]:
+        return ([t.strip() for t in self.mail_tenants.split(",") if t.strip()]
+                or [self.register_tenant])
+
+    def mail_config(self):  # noqa: ANN201 - the reader's own dataclass, imported lazily
+        from app.mail.reader import MailConfig
+
+        return MailConfig(
+            internal_domains={d.strip().lower() for d in self.mail_internal_domains.split(",") if d.strip()},
+            excluded_labels={lb.strip() for lb in self.mail_exclude_labels.split(",") if lb.strip()},
+            interval_s=self.mail_interval_s, max_threads_per_run=self.mail_max_threads_per_run,
+            backfill_pages_per_run=self.mail_backfill_pages_per_run,
+            min_confidence=self.mail_min_confidence, queue_days=self.mail_queue_days,
+            engine_concurrency=self.mail_engine_concurrency)
 
     def monitor_tenant_list(self) -> list[str]:
         return ([t.strip() for t in self.monitor_tenants.split(",") if t.strip()]

@@ -148,6 +148,7 @@ _ENTITY_CREATE_FIELDS = {
     "sector", "sub_sector", "lens", "state", "location", "city", "country", "address",
     "register_status", "lifecycle", "promoter_group_code", "about", "toi", "notes", "tags",
     "key_people", "news_aliases", "news_watch",   # News Radar (0030)
+    "email_domains",                               # mailbox reader (0031)
 }
 
 
