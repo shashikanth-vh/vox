@@ -11,7 +11,10 @@ from __future__ import annotations
 # perform the operations on its allowlist (least privilege), regardless of enforce_rbac. A
 # generic/unnamed API key keeps the legacy compatibility behaviour (governed by enforce_rbac).
 SERVICE_GRANTS: dict[str, set[str]] = {
-    "svc_pulse":     {"run_news_scan", "edit_intel"},
+    # svc_pulse: the news radar's intel, and the mailbox reader's two writes — the
+    # interaction a conversation becomes, and the outside domain a person teaches a
+    # company from the review queue (PULSE writes only email_domains on an entity).
+    "svc_pulse":     {"run_news_scan", "edit_intel", "log_interaction", "edit_client"},
     "svc_vox":       {"create_client", "add_lead", "edit_lead", "log_interaction",
                       "add_company_note", "add_employee_assign_role"},
     "svc_workflows": {"create_client", "add_lead", "edit_lead", "push_lead_to_deals",
@@ -62,7 +65,9 @@ SERVICE_READ_GRANTS: dict[str, set[str]] = {
     # log_to target). Read-only corpus context — the write is still only log_interaction.
     "svc_vox": {"/v1/entities", "/v1/leads", "/v1/people", "/v1/interactions",
                 "/v1/deals", "/v1/lending", "/v1/syndication", "/v1/asset-monetisation"},
-    "svc_pulse": {"/v1/entities", "/v1/external-intelligence", "/v1/leads"},
+    # svc_pulse: entities and leads for matching, deals so the mailbox reader can file a
+    # conversation on a company's live line (it reads the stage, nothing more).
+    "svc_pulse": {"/v1/entities", "/v1/external-intelligence", "/v1/leads", "/v1/deals"},
     "svc_workflows": {"/v1/entities", "/v1/leads", "/v1/deals", "/v1/lending",
                       "/v1/syndication", "/v1/asset-monetisation"},
     # Chitti — the chatbot VM — answers questions about anything in the book,

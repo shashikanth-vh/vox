@@ -68,9 +68,28 @@ async def test_svc_pulse_own_key_read_is_scoped(client: AsyncClient, _svc_and_si
     # /v1/leads too: their contacts name the promoters the news monitor searches.
     leads = await client.get("/v1/leads", headers={"X-API-Key": PULSE_KEY})
     assert leads.status_code == 200, leads.text
-    # /v1/deals is NOT → own-key read denied (no more tenant-wide read of every table).
+    # /v1/deals too: the mailbox reader files a conversation on the company's live line.
     deals = await client.get("/v1/deals", headers={"X-API-Key": PULSE_KEY})
-    assert deals.status_code == 403, deals.text
+    assert deals.status_code == 200, deals.text
+    # Still not every table: lending trackers are outside its reach.
+    lending = await client.get("/v1/lending", headers={"X-API-Key": PULSE_KEY})
+    assert lending.status_code == 403, lending.text
+    # The mailbox reader's writes: an interaction on a company, and the company's
+    # e-mail domains — the only entity field it ever touches.
+    ent = await client.post("/v1/entities", headers={"X-API-Key": PULSE_KEY}, json={
+        "code": "PULSEMAIL-R9", "legal_name": "Pulse Mail R9"})
+    assert ent.status_code in (201, 403), ent.text   # create_client is not its grant
+    if ent.status_code == 403:
+        ent = await client.post("/v1/entities", json={"code": "PULSEMAIL-R9", "legal_name": "Pulse Mail R9"})
+        assert ent.status_code == 201, ent.text
+    eid = ent.json()["id"]
+    logged = await client.post("/v1/interactions", headers={"X-API-Key": PULSE_KEY}, json={
+        "subject_type": "Entity", "subject_id": eid, "interaction_type": "Email / Written Correspondence",
+        "source": "Email", "summary": "Mailbox reader test"})
+    assert logged.status_code == 201, logged.text
+    taught = await client.patch(f"/v1/entities/{eid}", headers={"X-API-Key": PULSE_KEY},
+                                json={"email_domains": ["pulsemail.in"]})
+    assert taught.status_code == 200, taught.text
 
 
 # --------------------------------------------------------------------------- #
