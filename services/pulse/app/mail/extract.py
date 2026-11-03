@@ -170,7 +170,9 @@ class Extractor:
             "https://api.anthropic.com/v1/messages",
             headers={"x-api-key": self.anthropic_key, "anthropic-version": "2023-06-01",
                      "content-type": "application/json"},
-            json={"model": self.model, "max_tokens": 1200, "temperature": 0,
+            # No temperature: the current Claude models refuse the parameter outright
+            # ("`temperature` is deprecated for this model", HTTP 400, staging 3 Nov).
+            json={"model": self.model, "max_tokens": 1200,
                   "system": PROMPT, "messages": [{"role": "user", "content": convo}]})
         body = _json(r)
         if r.status_code != 200:
