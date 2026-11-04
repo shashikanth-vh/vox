@@ -121,6 +121,10 @@ class Probe42Client:
             429: "Rate limit exceeded or insufficient credits for this call (buy credits on the platform).",
             500: "Probe42 internal error: retry later.",
         }
+        if status == 403 and "missing authentication token" in msg.lower():
+            # AWS API Gateway wording for "no such route": the path is wrong, not the key or IP.
+            return ("Endpoint path does not exist on this Probe42 API (gateway said 'Missing Authentication Token'). "
+                    "Check the path in endpoints.json; the key and IP allowlist are not the problem.")
         base = table.get(status, f"HTTP {status}")
         return f"{base} Probe42 said: {msg!r}" if msg else base
 
@@ -254,7 +258,7 @@ class CompanyIntel:
         res["steps"].append({k: env.get(k) for k in ("url", "http_status", "ok", "error")})
         if not env.get("ok"):
             raise NotFoundError(f"Name search failed ({env.get('error')}). The search endpoint path in endpoints.json is "
-                                f"unverified; look the company up on business.probe42.in and pass its CIN/LLPIN/PAN.")
+                                f"unverified; look the company up on business.probe42.in and pass its CIN/LLPIN/PAN/BID.")
         data = env.get("data") or {}
         items = data.get("companies") or data.get("llps") or data.get("entities") or []
         res["candidates"] = items
@@ -692,7 +696,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         report["stats"] = {"total_calls": len(client.calls), "ok": sum(1 for c in client.calls if c.get("ok")),
                            "failed": sum(1 for c in client.calls if c.get("ok") is False),
                            "elapsed_ms": round((time.monotonic() - t0) * 1000)}
-        if client.calls and all(c.get("http_status") == 403 for c in client.calls):
+        if client.calls and all(c.get("http_status") == 403 and "does not exist" not in str(c.get("error")) for c in client.calls):
             report["error"] = ("All calls returned 403: check PROBE42_API_KEY and that this server's public IP "
                                "(--show-ip) is whitelisted on apiportal.probe42.in.")
             exit_code = 2
