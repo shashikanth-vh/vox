@@ -121,6 +121,9 @@ class Probe42Client:
             429: "Rate limit exceeded or insufficient credits for this call (buy credits on the platform).",
             500: "Probe42 internal error: retry later.",
         }
+        if "sandbox" in msg.lower() and "unsupported" in msg.lower():
+            return ("Sandbox only serves its fixed set of sample identifiers; this one is not among them. "
+                    "Use --env production for real companies (consumes credits), or a sandbox sample CIN from the portal.")
         if status == 403 and "missing authentication token" in msg.lower():
             # AWS API Gateway wording for "no such route": the path is wrong, not the key or IP.
             return ("Endpoint path does not exist on this Probe42 API (gateway said 'Missing Authentication Token'). "
