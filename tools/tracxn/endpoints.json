@@ -1,0 +1,42 @@
+{
+  "_comment": "Tracxn API registry built from the 'TracxnAPI Playground' Postman collection (v2.2 + v3.0 Key Metrics). Playground and production share identical paths; production simply drops the '/playground' segment. Header: accessToken. Tokens are environment-specific.",
+  "base_urls": {
+    "playground": "https://platform.tracxn.com/api/2.2/playground",
+    "production": "https://platform.tracxn.com/api/2.2"
+  },
+  "metrics_base_urls": {
+    "playground": "https://platform.tracxn.com/api/3.0/playground",
+    "production": "https://platform.tracxn.com/api/3.0"
+  },
+  "token_pages": {
+    "playground": "https://platform.tracxn.com/a/api/playground/apitoken",
+    "production": "Data Solutions > API & Developer Tools > Production > API Token (needs an API subscription)"
+  },
+  "page_size": 20,
+  "rate_limits": {"playground_per_hour": 100, "playground_per_day": 1000, "metrics_per_hour": 10, "metrics_per_day": 100},
+  "endpoints": {
+    "company_search":   {"method": "POST", "path": "/companies/search",         "description": "Name -> top 10 {id, name, domain}. companyName is mandatory, one value only."},
+    "companies":        {"method": "POST", "path": "/companies",                "description": "Full company profile: sectors, description, funding, investors, valuation, revenue, employees, ratings, scores, acquisitions, IPO, part-of, board, news, apps, contacts."},
+    "transactions":     {"method": "POST", "path": "/transactions",             "description": "Funding rounds (filter by company domain / companiesId): amount, date, category, investors, facilitators, post-money valuation."},
+    "acquisitions":     {"method": "POST", "path": "/acquisitiontransactions",  "description": "M&A deals: as target (domain) or as acquirer (acquirerListDomain): amounts, share price, valuation, sellers, notable people, cap table."},
+    "investors":        {"method": "POST", "path": "/investors",                "description": "Investor profiles filtered by portfolio company domain: type, location, feeds, investment score, social profiles."},
+    "company_metrics":  {"method": "POST", "path": "/companies/metric",         "base": "metrics", "description": "v3.0 Key Metrics aggregation (count / sum / avg / median funding or employees), bucketed by stage, sector or geography."}
+  },
+  "company_relations": {
+    "competitors":   {"filter": "competitorOf", "description": "Companies Tracxn tags as competitors of the target"},
+    "similar":       {"filter": "similarsOf",   "description": "Companies similar to the target"},
+    "subsidiaries":  {"filter": "partOfDomain", "description": "Companies that are part of the target"},
+    "customers":     {"filter": "vendorsDomain", "single": true, "description": "Companies for which the target is a vendor"},
+    "vendors":       {"filter": "customersDomain", "description": "Vendors of the target"}
+  },
+  "error_codes": {
+    "400": "Bad request: query syntax invalid",
+    "401": "Authentication issue: token missing or invalid",
+    "403": "Unauthorized: token expired, wrong environment, or access denied",
+    "404": "Endpoint does not exist",
+    "405": "Wrong HTTP method",
+    "429": "Rate limit exceeded (playground: 100/hour, 1000/day)",
+    "500": "Tracxn internal error, retry later",
+    "900": "Credit limit exceeded: contact Tracxn to renew"
+  }
+}
