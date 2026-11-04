@@ -671,7 +671,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                 ids = find_doc_ids(comp_data)[: args.documents]
                 docs = {}
                 for i, doc_id in enumerate(ids, 1):
-                    env = intel.fetch("document_by_id", entity, ident, idt, {"doc_id": doc_id}, group="reports")
+                    # live API expects 'doc-id' (hyphen) even though the spec writes doc_id
+                    env = intel.fetch("document_by_id", entity, ident, idt, {"doc-id": doc_id}, group="reports")
                     save_pdf(env, files_dir / f"{ident}_doc{i}.pdf")
                     docs[doc_id] = env
                 sections["reference_documents"] = {"ok": any(d.get("ok") for d in docs.values()), "available_doc_ids": find_doc_ids(comp_data),
