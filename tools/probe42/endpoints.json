@@ -1,0 +1,44 @@
+{
+  "_comment": "Probe42 endpoint registry. Each entry is appended to base_url. {id} is replaced by the resolved CIN / LLPIN. 'confirmed' = path verified against the public probe-py client; 'expected' = path as listed on the Probe42 API portal Explore page, adjust here if your portal shows a different path. Set enabled=false to skip an endpoint.",
+  "api_version": "1.3",
+  "base_urls": {
+    "sandbox": "https://api.probe42.in/probe_pro_sandbox",
+    "production": "https://api.probe42.in/probe_pro",
+    "lite": "https://api.probe42.in/probe_lite"
+  },
+  "search": {
+    "companies": {"path": "/companies", "params": ["filters", "limit", "offset"], "status": "confirmed"},
+    "llps": {"path": "/llps", "params": ["filters", "limit", "offset"], "status": "expected"},
+    "entities": {"path": "/entities", "params": ["filters", "limit", "offset"], "status": "expected"},
+    "authorized_signatories": {"path": "/authorized-signatories", "params": ["filters", "limit", "offset"], "status": "confirmed"}
+  },
+  "company": [
+    {"key": "base_details", "path": "/companies/{id}", "params": {"identifier_type": "CIN"}, "status": "confirmed", "description": "Legal name, CIN, status, incorporation date, classification, capital, registered address, e-filing status"},
+    {"key": "comprehensive_details", "path": "/companies/{id}/comprehensive-details", "status": "expected", "description": "Full profile: directors, shareholding, charges, financials summary, group companies, compliance flags"},
+    {"key": "kyc", "path": "/companies/{id}/kyc", "status": "expected", "description": "KYC block: PAN, GSTINs, registered office, contact details, SRN, compliance status"},
+    {"key": "authorized_signatories", "path": "/companies/{id}/authorized-signatories", "status": "confirmed", "description": "Directors and signatories with DIN, PAN, designation, appointment and cessation dates"},
+    {"key": "charges", "path": "/companies/{id}/charges", "status": "confirmed", "description": "Registered charges: holder, amount, date, type (secured lenders)"},
+    {"key": "financials", "path": "/companies/{id}/financials", "status": "confirmed", "description": "Year-wise balance sheet and P&L from MCA filings"},
+    {"key": "financial_ratios", "path": "/companies/{id}/financial-ratios", "status": "expected", "description": "Derived ratios: leverage, liquidity, profitability"},
+    {"key": "shareholdings", "path": "/companies/{id}/shareholdings", "status": "expected", "description": "Shareholding pattern from MGT-7 / annual return"},
+    {"key": "group_companies", "path": "/companies/{id}/group-companies", "status": "expected", "description": "Holding, subsidiary and associate companies"},
+    {"key": "gst_details", "path": "/companies/{id}/gst-details", "status": "expected", "description": "GSTIN registrations and GST filing compliance"},
+    {"key": "epfo_details", "path": "/companies/{id}/epfo-details", "status": "expected", "description": "EPFO establishments and monthly contribution trend"},
+    {"key": "legal_history", "path": "/companies/{id}/legal-history", "status": "expected", "description": "Litigation, NCLT / IBC and court cases"},
+    {"key": "credit_ratings", "path": "/companies/{id}/credit-ratings", "status": "expected", "description": "Credit rating history from rating agencies"},
+    {"key": "compliance", "path": "/companies/{id}/compliance", "status": "expected", "description": "Annual return and financial statement filing status (AOC-4, MGT-7)"},
+    {"key": "documents", "path": "/companies/{id}/documents", "status": "expected", "description": "List of MCA reference documents available for download"}
+  ],
+  "llp": [
+    {"key": "base_details", "path": "/llps/{id}", "status": "expected", "description": "LLP name, LLPIN, status, incorporation date, contribution, registered address"},
+    {"key": "comprehensive_details", "path": "/llps/{id}/comprehensive-details", "status": "expected", "description": "Full LLP profile: partners, charges, financials"},
+    {"key": "kyc", "path": "/llps/{id}/kyc", "status": "expected", "description": "LLP KYC block"},
+    {"key": "authorized_signatories", "path": "/llps/{id}/authorized-signatories", "status": "expected", "description": "Designated partners with DPIN / DIN"},
+    {"key": "charges", "path": "/llps/{id}/charges", "status": "expected", "description": "Registered charges"},
+    {"key": "financials", "path": "/llps/{id}/financials", "status": "expected", "description": "Year-wise statement of accounts and solvency"},
+    {"key": "gst_details", "path": "/llps/{id}/gst-details", "status": "expected", "description": "GST registrations and compliance"},
+    {"key": "epfo_details", "path": "/llps/{id}/epfo-details", "status": "expected", "description": "EPFO details"},
+    {"key": "legal_history", "path": "/llps/{id}/legal-history", "status": "expected", "description": "Litigation history"},
+    {"key": "documents", "path": "/llps/{id}/documents", "status": "expected", "description": "Reference documents"}
+  ]
+}
