@@ -325,7 +325,10 @@ async def data_register(
     ad_hoc: list[Document] = []
     for d in docs:
         if d.slot_key:
-            docs_by_slot.setdefault(d.slot_key, []).append(d)
+            # A slot can hold several files: the 2nd, 3rd… are filed as "<slot>~2",
+            # "<slot>~3" (their own keys, so uploading one never supersedes another).
+            # They all count for the slot itself.
+            docs_by_slot.setdefault(d.slot_key.split("~", 1)[0], []).append(d)
         else:
             ad_hoc.append(d)
 

@@ -120,6 +120,47 @@ async def test_data_register_rollup_progress(client: AsyncClient):
     assert body["required_on_file"] == 1  # ad-hoc doesn't move required progress
 
 
+async def test_a_slot_holds_several_files_and_replace_supersedes_only_its_own(client: AsyncClient):
+    """Every director's KYC, twelve months of bank statements: the Data Register files the
+    2nd, 3rd… file of a slot as "<slot>~2", "<slot>~3". Each is live on its own key —
+    adding one never supersedes another — and all of them count for the slot."""
+    await _seed_checklist(client)
+    lead_id = (await client.post("/v1/leads", json={"company": "Multi"})).json()["id"]
+    sec = "KYC & Constitutional"
+
+    async def up(key: str, name: str) -> dict:
+        r = await client.post(f"/v1/leads/{lead_id}/documents/upload",
+                              files={"file": (name, name.encode(), "application/pdf")},
+                              data={"section": sec, "slot_key": key, "title": "COI"})
+        assert r.status_code == 201, r.text
+        return r.json()
+
+    first = await up("coi", "coi-1.pdf")
+    second = await up("coi~2", "coi-2.pdf")
+    third = await up("coi~3", "coi-3.pdf")
+
+    listed = (await client.get(f"/v1/leads/{lead_id}/documents", params={"limit": 50})).json()
+    rows = listed if isinstance(listed, list) else listed["items"]
+    status = {r["id"]: r["status"] for r in rows}
+    assert status[first["id"]] == status[second["id"]] == status[third["id"]] == "On File"
+
+    body = (await client.get(f"/v1/leads/{lead_id}/data-register")).json()
+    kyc = next(s for s in body["sections"] if s["section"] == sec)
+    coi = next(i for i in kyc["items"] if i["slot_key"] == "coi")
+    assert coi["on_file"] is True and coi["count"] == 3
+    assert body["required_on_file"] == 1, "three files still fill ONE required slot"
+    assert body["ad_hoc"] == [], "the ~n files belong to their slot, not to ad-hoc"
+
+    # "Replace with new version" on the second file uploads into ITS key: that one is
+    # superseded, the other two stay live.
+    newer = await up("coi~2", "coi-2-v2.pdf")
+    listed = (await client.get(f"/v1/leads/{lead_id}/documents", params={"limit": 50})).json()
+    rows = listed if isinstance(listed, list) else listed["items"]
+    status = {r["id"]: r["status"] for r in rows}
+    assert status[second["id"]] == "Superseded"
+    assert status[first["id"]] == status[third["id"]] == status[newer["id"]] == "On File"
+
+
 async def test_inline_over_limit_rejected(client: AsyncClient):
     lead_id = (await client.post("/v1/leads", json={"company": "Big"})).json()["id"]
     # settings.documents_inline_max_bytes defaults to 400 KB; send 500 KB.

@@ -6,6 +6,17 @@ bundle, or just check that the newest item below is present in your copy).
 
 ## Unreleased (working branch: claude/register-service-postgres)
 
+- **The Data Register is redesigned, and a checklist row can hold several files.**
+  Tabs across the top (Files; Conversations, Tasks, Decisions and Lenders reserved),
+  the folders down the left with a *got / required* count on any that is short, and
+  each folder as a Name / Review table with *Upload* and *New folder*. The overall
+  "N of M required on file" line stays, in the title. Every picker takes several
+  files at once, and files can be dragged in: onto a checklist row they file under
+  that row, anywhere else in the folder they are filed as loose papers. A row's
+  2nd, 3rd… file is kept under its own key ("dirkyc~2", "dirkyc~3"), so adding one
+  never supersedes another; *Replace with new version* on a file supersedes exactly
+  that file. The register's checklist rollup counts every "~n" file for its slot.
+
 - **The mailbox reader: a person connects their work mailbox once, and every
   conversation with a company becomes an interaction on that company's timeline.**
   Opt-in per person. *My mailbox* in the account menu (and a one-time line on Today)
