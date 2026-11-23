@@ -251,8 +251,8 @@ export default function DataRegisterDialog({ code, entityId: entityIdProp, open,
 
   const folderItem = (k: string, t: string) => {
     const active = sel === k;
-    const f = folders.find((x) => x.k === k);
-    const rc = f ? reqCount(f) : null;
+    // How many files the folder holds — every live file, extras and loose papers included.
+    const n = Object.keys(docs[k] || {}).length;
     return (
       <Box key={k} component="button" type="button" onClick={() => setSel(k)}
         sx={{ all: 'unset', boxSizing: 'border-box', width: '100%', display: 'flex', alignItems: 'center', gap: 1.1,
@@ -262,11 +262,10 @@ export default function DataRegisterDialog({ code, entityId: entityIdProp, open,
           '&:focus-visible': { outline: `2px solid ${tokens.teal}`, outlineOffset: -2 } }}>
         <FolderIcon sx={{ fontSize: 20, color: '#C99A2E' }} />
         <Box component="span" sx={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t}</Box>
-        {rc && rc.n > 0 && rc.got < rc.n && (
-          <Tooltip title={`${rc.n - rc.got} required missing`}>
-            <Box component="span" sx={{ fontSize: 11, fontWeight: 700, color: tokens.warn }}>{rc.got}/{rc.n}</Box>
-          </Tooltip>
-        )}
+        <Tooltip title={`${n} file${n === 1 ? '' : 's'} uploaded`}>
+          <Box component="span" sx={{ fontSize: 11.5, fontWeight: 700, color: n ? tokens.ink : tokens.muted,
+            bgcolor: n ? tokens.paper : 'transparent', borderRadius: 99, px: 0.9, py: 0.1, minWidth: 22, textAlign: 'center' }}>{n}</Box>
+        </Tooltip>
       </Box>
     );
   };
