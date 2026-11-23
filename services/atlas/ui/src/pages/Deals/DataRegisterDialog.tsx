@@ -278,13 +278,20 @@ export default function DataRegisterDialog({ code, entityId: entityIdProp, open,
   });
 
   /** One file line: badge, name (and the slot it belongs to), review, actions. */
-  const fileLine = (sec: string, title: string, dd: Row, f: FileRef, slot: boolean, sub?: string) => (
+  const fileLine = (sec: string, title: string, dd: Row, f: FileRef, slot: boolean, subIn?: string) => {
+    // A loose paper owns its name: show its TITLE — what Rename changes — and, once it
+    // no longer matches, the uploaded file's name under it. A checklist file shows the
+    // uploaded file's name, with the slot's name beneath.
+    const stem = f.e.name.replace(/\.[^.]+$/, '');
+    const shown = slot ? f.e.name : (f.e.label || f.e.name);
+    const sub = slot ? subIn : (f.e.label && f.e.label !== stem && f.e.label !== f.e.name ? f.e.name : undefined);
+    return (
     <>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.4, minWidth: 0 }}>
         <FileBadge name={f.e.name} />
         <Box sx={{ minWidth: 0 }}>
           <Tooltip title={`${f.e.name} · ${fmtKB(f.e.size)} · ${f.e.by} · ${f.e.when}`} placement="top-start">
-            <Typography noWrap sx={{ fontSize: 14, color: tokens.ink }}>{f.e.name}</Typography>
+            <Typography noWrap sx={{ fontSize: 14, color: tokens.ink }}>{shown}</Typography>
           </Tooltip>
           {sub && <Typography noWrap sx={{ fontSize: 11.5, color: tokens.muted }}>{sub}</Typography>}
         </Box>
@@ -297,7 +304,8 @@ export default function DataRegisterDialog({ code, entityId: entityIdProp, open,
         </IconButton>
       </Box>
     </>
-  );
+    );
+  };
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth PaperProps={{ sx: { height: 'min(720px, 88vh)' } }}>
