@@ -160,6 +160,13 @@ async def test_a_slot_holds_several_files_and_replace_supersedes_only_its_own(cl
     assert status[second["id"]] == "Superseded"
     assert status[first["id"]] == status[third["id"]] == status[newer["id"]] == "On File"
 
+    # Rename works on a checklist file too: the title changes, the slot it fills does not.
+    ren = await client.patch(f"/v1/documents/{third['id']}", json={"title": "COI — 2019 reissue"})
+    assert ren.status_code == 200, ren.text
+    assert (ren.json()["title"], ren.json()["slot_key"]) == ("COI — 2019 reissue", "coi~3")
+    body = (await client.get(f"/v1/leads/{lead_id}/data-register")).json()
+    assert body["required_on_file"] == 1 and body["ad_hoc"] == []
+
 
 async def test_inline_over_limit_rejected(client: AsyncClient):
     lead_id = (await client.post("/v1/leads", json={"company": "Big"})).json()["id"]

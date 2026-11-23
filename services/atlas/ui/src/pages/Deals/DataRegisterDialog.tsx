@@ -278,13 +278,19 @@ export default function DataRegisterDialog({ code, entityId: entityIdProp, open,
   });
 
   /** One file line: badge, name (and the slot it belongs to), review, actions. */
+  /** The name a file goes by. Rename sets the TITLE; until then a loose paper's title is
+   *  its file name and a checklist file's title is the checklist row's — so a checklist
+   *  file shows its file name until someone renames it. */
+  const shownName = (f: FileRef, dd: Row, slot: boolean) =>
+    slot ? (f.e.label && f.e.label !== dd.n ? f.e.label : f.e.name) : (f.e.label || f.e.name);
+
   const fileLine = (sec: string, title: string, dd: Row, f: FileRef, slot: boolean, subIn?: string) => {
-    // A loose paper owns its name: show its TITLE — what Rename changes — and, once it
-    // no longer matches, the uploaded file's name under it. A checklist file shows the
-    // uploaded file's name, with the slot's name beneath.
+    // The uploaded file's name goes beneath once the shown name no longer says it
+    // (a checklist file that is not renamed shows the row's name there instead).
     const stem = f.e.name.replace(/\.[^.]+$/, '');
-    const shown = slot ? f.e.name : (f.e.label || f.e.name);
-    const sub = slot ? subIn : (f.e.label && f.e.label !== stem && f.e.label !== f.e.name ? f.e.name : undefined);
+    const shown = shownName(f, dd, slot);
+    const renamed = shown !== f.e.name && shown !== stem;
+    const sub = renamed ? (slot && subIn ? `${subIn} · ${f.e.name}` : f.e.name) : (slot ? subIn : undefined);
     return (
     <>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.4, minWidth: 0 }}>
@@ -499,9 +505,10 @@ export default function DataRegisterDialog({ code, entityId: entityIdProp, open,
           <MenuItem onClick={() => { const m = menu; setMenu(null);
             pick({ kind: 'slot', sec: m.sec, dk: m.dd.k, label: m.dd.n, required: !!m.dd.req }); }}>Add more files</MenuItem>
         )}
-        {/* Ad-hoc documents (keys minted x_…) own their name — standard slots take theirs from the checklist. */}
-        {menu && menu.f.e.id && menu.f.key.startsWith('x_') && !ro && (
-          <MenuItem onClick={() => { const e = menu.f.e; setMenu(null); setRen({ id: e.id!, name: e.label || e.name }); }}>Rename</MenuItem>
+        {/* Any file can be renamed — its title changes; the checklist row it fills does not. */}
+        {menu && menu.f.e.id && !ro && (
+          <MenuItem onClick={() => { const m = menu; setMenu(null);
+            setRen({ id: m.f.e.id!, name: shownName(m.f, m.dd, m.slot) }); }}>Rename</MenuItem>
         )}
         {menu && !ro && (
           <MenuItem sx={{ color: tokens.bad }}
